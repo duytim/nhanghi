@@ -39,6 +39,13 @@
     };
 
     const InvoicePopup = ({ invoice, onClose }) => {
+      const formatHours = (hours) => {
+        const totalMinutes = Math.round(hours * 60);
+        const h = Math.floor(totalMinutes / 60);
+        const m = totalMinutes % 60;
+        return `${h} giờ ${m} phút`;
+      };
+
       return (
         <div className="fixed inset-0 modal-overlay flex items-center justify-center z-50">
           <div className="bg-white p-6 rounded-lg shadow-xl max-w-lg w-full">
@@ -55,7 +62,7 @@
                 </tr>
                 <tr className="border-b">
                   <td className="py-2 font-medium">Số giờ sử dụng:</td>
-                  <td className="py-2">{invoice.hoursUsed.toFixed(2)}</td>
+                  <td className="py-2">{formatHours(invoice.hoursUsed)}</td>
                 </tr>
                 <tr className="border-b">
                   <td className="py-2 font-medium">Sản phẩm:</td>
@@ -233,6 +240,9 @@
         setLoading(true);
         try {
           const file = event.target.files[0];
+          if (!file) {
+            throw new Error('Vui lòng chọn file Excel');
+          }
           const formData = new FormData();
           formData.append('file', file);
           await axios.post('/api/inventory/import', formData);
@@ -246,6 +256,18 @@
       };
 
       const handleManualInventory = async () => {
+        if (!manualInventory.name) {
+          showToast('Tên sản phẩm là bắt buộc', 'error');
+          return;
+        }
+        if (manualInventory.quantity < 0) {
+          showToast('Số lượng không được âm', 'error');
+          return;
+        }
+        if (manualInventory.purchasePrice < 0) {
+          showToast('Giá nhập không được âm', 'error');
+          return;
+        }
         setLoading(true);
         try {
           await axios.post('/api/inventory/price', {
@@ -293,10 +315,13 @@
       };
 
       const getCurrentHours = (checkInTime) => {
-        if (!checkInTime) return 0;
+        if (!checkInTime) return '0 giờ 0 phút';
         const now = new Date();
         const checkIn = new Date(checkInTime);
-        return ((now - checkIn) / (1000 * 60 * 60)).toFixed(2);
+        const totalMinutes = Math.round((now - checkIn) / (1000 * 60));
+        const hours = Math.floor(totalMinutes / 60);
+        const minutes = totalMinutes % 60;
+        return `${hours} giờ ${minutes} phút`;
       };
 
       return (
@@ -384,7 +409,7 @@
                             <br />
                             Vào: {new Date(room.checkInTime).toLocaleTimeString('vi-VN')}
                             <br />
-                            Đã dùng: {getCurrentHours(room.checkInTime)} giờ
+                            Đã dùng: {getCurrentHours(room.checkInTime)}
                           </div>
                         )}
                       </div>
@@ -638,6 +663,7 @@
                             value={manualInventory.name}
                             onChange={(e) => setManualInventory({ ...manualInventory, name: e.target.value })}
                             className="border p-2 w-full rounded"
+                            required
                           />
                         </div>
                         <div>
@@ -647,6 +673,8 @@
                             value={manualInventory.quantity}
                             onChange={(e) => setManualInventory({ ...manualInventory, quantity: parseInt(e.target.value) || 0 })}
                             className="border p-2 w-full rounded"
+                            min="0"
+                            required
                           />
                         </div>
                         <div>
@@ -656,6 +684,8 @@
                             value={manualInventory.purchasePrice}
                             onChange={(e) => setManualInventory({ ...manualInventory, purchasePrice: parseInt(e.target.value) || 0 })}
                             className="border p-2 w-full rounded"
+                            min="0"
+                            required
                           />
                         </div>
                         <div>
@@ -665,12 +695,13 @@
                             value={manualInventory.salePrice}
                             onChange={(e) => setManualInventory({ ...manualInventory, salePrice: parseInt(e.target.value) || 0 })}
                             className="border p-2 w-full rounded"
+                            min="0"
                           />
                         </div>
                         <button
                           onClick={handleManualInventory}
                           className="btn-primary text-white px-4 py-2 rounded"
-                          disabled={loading || !manualInventory.name || !manualInventory.quantity || !manualInventory.purchasePrice}
+                          disabled={loading}
                         >
                           Thêm sản phẩm
                         </button>
@@ -695,6 +726,7 @@
                               [item._id]: e.target.value
                             })}
                             className="border p-2 w-32 rounded"
+                            min="0"
                           />
                           {!item.salePrice && <span className="text-red-500 ml-2">Chưa đặt giá</span>}
                         </div>
