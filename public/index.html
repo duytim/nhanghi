@@ -9,36 +9,57 @@
   <script src="https://cdn.jsdelivr.net/npm/axios@1.6.8/dist/axios.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.22.9/babel.min.js"></script>
-  <style>
-    body { background-color: #f3f4f6; }
-    .modal-overlay { background: rgba(0, 0, 0, 0.7); }
-    .card { transition: transform 0.2s; }
-    .card:hover { transform: translateY(-2px); }
-    .btn-primary { background-color: #2563eb; }
-    .btn-primary:hover { background-color: #1e40af; }
-    .toast { animation: slideIn 0.5s, slideOut 0.5s 2.5s forwards; }
-    @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
-    @keyframes slideOut { from { transform: translateX(0); } to { transform: translateX(100%); } }
-  </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-date-picker@10.2.0/dist/DatePicker.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-select@5.7.0/dist/react-select.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-draggable@4.4.5/build/web/react-draggable.min.js"></script>
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <link rel="stylesheet" href="/styles.css">
+  <link href="https://cdn.jsdelivr.net/npm/react-date-picker@10.2.0/dist/DatePicker.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/react-select@5.7.0/dist/react-select.min.css" rel="stylesheet">
 </head>
 <body>
   <div id="root"></div>
   <script type="text/babel">
-    const { useState, useEffect } = React;
+    const { useState, useEffect, useCallback, useMemo, lazy, Suspense } = React;
 
-    const Toast = ({ message, type, onClose }) => {
-      useEffect(() => {
-        const timer = setTimeout(onClose, 3000);
-        return () => clearTimeout(timer);
-      }, [onClose]);
+    // Lazy-load components
+    const ToastContainer = lazy(() => import('./ToastContainer'));
+    const InvoicePopup = lazy(() => import('./InvoicePopup'));
+
+    const ToastContainer = ({ toasts, removeToast }) => {
       return (
-        <div className={`fixed top-4 right-4 p-4 rounded-lg shadow-lg text-white ${type === 'error' ? 'bg-red-500' : 'bg-green-500'} toast`}>
-          {message}
+        <div className="fixed bottom-4 right-4 space-y-2 z-50">
+          {toasts.slice(-3).map(toast => (
+            <div
+              key={toast.id}
+              className={`p-4 rounded-lg shadow-lg text-white flex items-center space-x-2 animate-fade-in
+                ${toast.type === 'error' ? 'bg-red-500' : toast.type === 'warning' ? 'bg-yellow-500' : toast.type === 'info' ? 'bg-blue-500' : 'bg-green-500'}`}
+            >
+              <span>{toast.message}</span>
+              {toast.action && (
+                <button
+                  onClick={() => toast.action.callback()}
+                  className="underline hover:text-gray-200"
+                >
+                  {toast.action.label}
+                </button>
+              )}
+              <button
+                onClick={() => removeToast(toast.id)}
+                className="text-white hover:text-gray-200"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
         </div>
       );
     };
 
     const InvoicePopup = ({ invoice, onClose }) => {
+      const { jsPDF } = window.jspdf;
       const formatHours = (hours) => {
         const totalMinutes = Math.round(hours * 60);
         const h = Math.floor(totalMinutes / 60);
@@ -46,52 +67,84 @@
         return `${h} giờ ${m} phút`;
       };
 
+      const handlePrint = () => {
+        window.print();
+      };
+
+      const handleExportPDF = () => {
+        const doc = new jsPDF();
+        doc.setFontSize(16);
+        doc.text(`Hóa Đơn Phòng ${invoice.roomNumber}`, 10, 10);
+        doc.setFontSize(12);
+        doc.text(`Thời gian vào: ${new Date(invoice.checkInTime).toLocaleString('vi-VN')}`, 10, 20);
+        doc.text(`Thời gian ra: ${new Date(invoice.checkOutTime).toLocaleString('vi-VN')}`, 10, 30);
+        doc.text(`Số giờ sử dụng: ${formatHours(invoice.hoursUsed)}`, 10, 40);
+        doc.text(`Sản phẩm: ${invoice.items.join(', ') || 'Không có'}`, 10, 50);
+        doc.text(`Phụ thu: ${invoice.surcharge.amount.toLocaleString('vi-VN')} VND (${invoice.surcharge.note || 'Không'})`, 10, 60);
+        doc.text(`Tổng tiền: ${invoice.total.toLocaleString('vi-VN')} VND`, 10, 70);
+        doc.save(`hoa_don_phong_${invoice.roomNumber}.pdf`);
+      };
+
       return (
-        <div className="fixed inset-0 modal-overlay flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-lg shadow-xl max-w-lg w-full">
-            <h3 className="text-xl font-semibold mb-4">Hóa Đơn Phòng {invoice.roomNumber}</h3>
-            <table className="w-full text-left border-collapse">
-              <tbody>
-                <tr className="border-b">
-                  <td className="py-2 font-medium">Thời gian vào:</td>
-                  <td className="py-2">{new Date(invoice.checkInTime).toLocaleString('vi-VN')}</td>
-                </tr>
-                <tr className="border-b">
-                  <td className="py-2 font-medium">Thời gian ra:</td>
-                  <td className="py-2">{new Date(invoice.checkOutTime).toLocaleString('vi-VN')}</td>
-                </tr>
-                <tr className="border-b">
-                  <td className="py-2 font-medium">Số giờ sử dụng:</td>
-                  <td className="py-2">{formatHours(invoice.hoursUsed)}</td>
-                </tr>
-                <tr className="border-b">
-                  <td className="py-2 font-medium">Sản phẩm:</td>
-                  <td className="py-2">{invoice.items.join(', ') || 'Không có'}</td>
-                </tr>
-                <tr className="border-b">
-                  <td className="py-2 font-medium">Phụ thu:</td>
-                  <td className="py-2">{invoice.surcharge.amount.toLocaleString('vi-VN')} VND ({invoice.surcharge.note || 'Không'})</td>
-                </tr>
-                <tr className="border-b">
-                  <td className="py-2 font-medium">Tổng tiền:</td>
-                  <td className="py-2 font-bold">{invoice.total.toLocaleString('vi-VN')} VND</td>
-                </tr>
-              </tbody>
-            </table>
-            <div className="flex justify-end mt-4">
-              <button
-                onClick={onClose}
-                className="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600"
-              >
-                Đóng
-              </button>
+        <Draggable>
+          <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 animate-fade-in">
+            <div className="bg-white p-6 rounded-lg shadow-xl max-w-lg w-full print:bg-white print:shadow-none">
+              <h3 className="text-xl font-semibold mb-4 print:text-center">Hóa Đơn Phòng {invoice.roomNumber}</h3>
+              <table className="w-full text-left border-collapse print:border print:border-gray-300">
+                <tbody>
+                  <tr className="border-b print:border-gray-300">
+                    <td className="py-2 font-medium">Thời gian vào:</td>
+                    <td className="py-2">{new Date(invoice.checkInTime).toLocaleString('vi-VN')}</td>
+                  </tr>
+                  <tr className="border-b print:border-gray-300">
+                    <td className="py-2 font-medium">Thời gian ra:</td>
+                    <td className="py-2">{new Date(invoice.checkOutTime).toLocaleString('vi-VN')}</td>
+                  </tr>
+                  <tr className="border-b print:border-gray-300">
+                    <td className="py-2 font-medium">Số giờ sử dụng:</td>
+                    <td className="py-2">{formatHours(invoice.hoursUsed)}</td>
+                  </tr>
+                  <tr className="border-b print:border-gray-300">
+                    <td className="py-2 font-medium">Sản phẩm:</td>
+                    <td className="py-2">{invoice.items.join(', ') || 'Không có'}</td>
+                  </tr>
+                  <tr className="border-b print:border-gray-300">
+                    <td className="py-2 font-medium">Phụ thu:</td>
+                    <td className="py-2">{invoice.surcharge.amount.toLocaleString('vi-VN')} VND ({invoice.surcharge.note || 'Không'})</td>
+                  </tr>
+                  <tr className="border-b print:border-gray-300">
+                    <td className="py-2 font-medium">Tổng tiền:</td>
+                    <td className="py-2 font-bold">{invoice.total.toLocaleString('vi-VN')} VND</td>
+                  </tr>
+                </tbody>
+              </table>
+              <div className="flex justify-end mt-4 space-x-2 print:hidden">
+                <button
+                  onClick={handlePrint}
+                  className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                >
+                  In
+                </button>
+                <button
+                  onClick={handleExportPDF}
+                  className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600"
+                >
+                  Xuất PDF
+                </button>
+                <button
+                  onClick={onClose}
+                  className="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600"
+                >
+                  Đóng
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        </Draggable>
       );
     };
 
-    const App = () => {
+    const App = React.memo(() => {
       const [rooms, setRooms] = useState([]);
       const [inventory, setInventory] = useState([]);
       const [selectedRoom, setSelectedRoom] = useState(null);
@@ -107,45 +160,62 @@
         fullName: '',
       });
       const [loading, setLoading] = useState(false);
-      const [activeTab, setActiveTab] = useState('prices');
+      const [activeTab, setActiveTab] = useState(localStorage.getItem('activeTab') || 'prices');
       const [manualInventory, setManualInventory] = useState({ name: '', quantity: 0, purchasePrice: 0, salePrice: 0 });
       const [productPrices, setProductPrices] = useState({});
-      const [toast, setToast] = useState({ message: '', type: '', show: false });
+      const [toasts, setToasts] = useState([]);
       const [invoice, setInvoice] = useState(null);
+      const [transactions, setTransactions] = useState([]);
+      const [dateRange, setDateRange] = useState([new Date(), new Date()]);
+      const [filter, setFilter] = useState({ room: null, type: null });
+      const [bulkInventory, setBulkInventory] = useState([{ name: '', quantity: 0, purchasePrice: 0, salePrice: 0 }]);
+      const socket = useMemo(() => io(), []);
 
       useEffect(() => {
         fetchData();
-        const interval = setInterval(() => {
-          setRooms(prev => [...prev]); // Force re-render for real-time hours
-        }, 60000); // Update every minute
-        return () => clearInterval(interval);
+        const interval = setInterval(() => setRooms(prev => [...prev]), 60000);
+        socket.on('roomUpdate', (updatedRooms) => setRooms(updatedRooms));
+        socket.on('inventoryUpdate', (updatedInventory) => setInventory(updatedInventory));
+        return () => {
+          clearInterval(interval);
+          socket.disconnect();
+        };
       }, []);
 
-      const showToast = (message, type) => {
-        setToast({ message, type, show: true });
-        setTimeout(() => setToast({ message: '', type: '', show: false }), 3000);
-      };
+      useEffect(() => {
+        localStorage.setItem('activeTab', activeTab);
+      }, [activeTab]);
 
-      const fetchData = async () => {
+      const addToast = useCallback((message, type, action = null) => {
+        const id = Date.now();
+        setToasts(prev => [...prev, { id, message, type, action }]);
+      }, []);
+
+      const removeToast = useCallback((id) => {
+        setToasts(prev => prev.filter(toast => toast.id !== id));
+      }, []);
+
+      const fetchData = useCallback(async () => {
         setLoading(true);
         try {
-          const [roomsRes, inventoryRes, reportRes] = await Promise.all([
+          const [roomsRes, inventoryRes, reportRes, transactionsRes] = await Promise.all([
             axios.get('/api/rooms'),
             axios.get('/api/inventory'),
             axios.get('/api/reports'),
+            axios.get('/api/transactions'),
           ]);
           setRooms(roomsRes.data);
           setInventory(inventoryRes.data);
           setReport(reportRes.data);
+          setTransactions(transactionsRes.data);
         } catch (error) {
-          console.error('Lỗi khi lấy dữ liệu:', error);
-          showToast('Lỗi khi lấy dữ liệu: ' + error.message, 'error');
+          addToast('Lỗi khi lấy dữ liệu: ' + error.message, 'error');
         } finally {
           setLoading(false);
         }
-      };
+      }, []);
 
-      const handleCheckIn = async (roomId) => {
+      const handleCheckIn = useCallback(async (roomId) => {
         setLoading(true);
         try {
           await axios.post('/api/checkin', {
@@ -159,15 +229,15 @@
           fetchData();
           setCheckInData({ items: [], surcharge: { amount: 0, note: '' }, type: 'hourly', cccd: '', fullName: '' });
           setSelectedRoom(null);
-          showToast('Check-in thành công', 'success');
+          addToast('Check-in thành công', 'success');
         } catch (error) {
-          showToast('Lỗi khi check-in: ' + (error.response?.data?.error || error.message), 'error');
+          addToast('Lỗi khi check-in: ' + (error.response?.data?.error || error.message), 'error');
         } finally {
           setLoading(false);
         }
-      };
+      }, [checkInData, fetchData]);
 
-      const handleCheckOut = async (roomId) => {
+      const handleCheckOut = useCallback(async (roomId) => {
         setLoading(true);
         try {
           const response = await axios.post('/api/checkout', { roomId, surcharge: checkInData.surcharge });
@@ -191,86 +261,84 @@
           fetchData();
           setCheckInData({ items: [], surcharge: { amount: 0, note: '' }, type: 'hourly', cccd: '', fullName: '' });
           setSelectedRoom(null);
+          addToast('Check-out thành công', 'success', {
+            label: 'Hoàn tác',
+            callback: async () => {
+              await axios.post('/api/undo-checkout', { roomId });
+              fetchData();
+              addToast('Hoàn tác check-out thành công', 'success');
+            },
+          });
         } catch (error) {
-          showToast('Lỗi khi check-out: ' + (error.response?.data?.error || error.message), 'error');
+          addToast('Lỗi khi check-out: ' + (error.response?.data?.error || error.message), 'error');
         } finally {
           setLoading(false);
         }
-      };
+      }, [checkInData, rooms, inventory, fetchData]);
 
-      const handleCleanRoom = async (roomId) => {
-        if (window.confirm('Xác nhận phòng đã được dọn sạch và chuyển sang trạng thái trống?')) {
+      const handleCleanRoom = useCallback(async (roomId) => {
+        if (window.confirm('Xác nhận phòng đã được dọn sạch?')) {
           setLoading(true);
           try {
             await axios.post('/api/clean-room', { roomId });
             fetchData();
             setSelectedRoom(null);
-            showToast('Phòng đã được chuyển sang trạng thái trống', 'success');
+            addToast('Phòng đã được dọn sạch', 'success');
           } catch (error) {
-            showToast('Lỗi khi cập nhật trạng thái phòng: ' + (error.response?.data?.error || error.message), 'error');
+            addToast('Lỗi khi dọn phòng: ' + (error.response?.data?.error || error.message), 'error');
           } finally {
             setLoading(false);
           }
         }
-      };
+      }, [fetchData]);
 
-      const handleAdminLogin = () => {
+      const handleAdminLogin = useCallback(() => {
         if (pin === '123456') {
           setIsAdmin(true);
           setPin('');
-          showToast('Đăng nhập admin thành công', 'success');
+          addToast('Đăng nhập admin thành công', 'success');
         } else {
-          showToast('Mã PIN không đúng', 'error');
+          addToast('Mã PIN không đúng', 'error');
         }
-      };
+      }, [pin]);
 
-      const handlePriceUpdate = async () => {
+      const handlePriceUpdate = useCallback(async () => {
         setLoading(true);
         try {
           await axios.post('/api/prices', prices);
-          showToast('Cập nhật giá thành công', 'success');
+          addToast('Cập nhật giá thành công', 'success');
         } catch (error) {
-          showToast('Lỗi khi cập nhật giá: ' + (error.response?.data?.error || error.message), 'error');
+          addToast('Lỗi khi cập nhật giá: ' + (error.response?.data?.error || error.message), 'error');
         } finally {
           setLoading(false);
         }
-      };
+      }, [prices]);
 
-      const handleExcelImport = async (event) => {
+      const handleExcelImport = useCallback(async (event) => {
         setLoading(true);
         try {
           const file = event.target.files[0];
-          if (!file) {
-            throw new Error('Vui lòng chọn file Excel');
-          }
+          if (!file) throw new Error('Vui lòng chọn file Excel');
           const formData = new FormData();
           formData.append('file', file);
           await axios.post('/api/inventory/import', formData);
           fetchData();
-          showToast('Nhập kho thành công', 'success');
+          addToast('Nhập kho thành công', 'success');
         } catch (error) {
-          showToast('Lỗi khi nhập kho: ' + (error.response?.data?.error || error.message), 'error');
+          addToast('Lỗi khi nhập kho: ' + (error.response?.data?.error || error.message), 'error');
         } finally {
           setLoading(false);
         }
-      };
+      }, [fetchData]);
 
-      const handleManualInventory = async () => {
-        if (!manualInventory.name) {
-          showToast('Tên sản phẩm là bắt buộc', 'error');
-          return;
-        }
-        if (manualInventory.quantity < 0) {
-          showToast('Số lượng không được âm', 'error');
-          return;
-        }
-        if (manualInventory.purchasePrice < 0) {
-          showToast('Giá nhập không được âm', 'error');
+      const handleManualInventory = useCallback(async () => {
+        if (!manualInventory.name || manualInventory.quantity < 0 || manualInventory.purchasePrice < 0) {
+          addToast('Tên, số lượng và giá nhập là bắt buộc, không được âm', 'warning');
           return;
         }
         setLoading(true);
         try {
-          await axios.post('/api/inventory/price', {
+          await axios.post('/api/inventory', {
             id: manualInventory.id || null,
             name: manualInventory.name,
             quantity: manualInventory.quantity,
@@ -278,504 +346,766 @@
             salePrice: manualInventory.salePrice || 0,
           });
           fetchData();
-          setManualInventory({ name: '', quantity: 0, purchasePrice: 0, salePrice: 0 });
-          showToast('Thêm sản phẩm thủ công thành công', 'success');
+          setManualInventory({ name: '', quantity: '', purchasePrice: 0, salePrice: 0 });
+          addToast('Thêm sản phẩm thành công', 'success');
         } catch (error) {
-          showToast('Lỗi khi thêm sản phẩm: ' + (error.response?.data?.error || error.message), 'error');
+          addToast('Lỗi khi thêm sản phẩm: ' + (error.response?.data?.error || error.message), 'error');
         } finally {
           setLoading(false);
         }
-      };
+      }, [manualInventory, fetchData]);
 
-      const handleProductPriceUpdate = async () => {
+      const handleBulkInventory = useCallback(async () => {
+        const validItems = bulkInventory.filter(item => item.name && item.quantity >= 0 && item.purchasePrice >= 0);
+        if (!validItems.length) {
+          addToast('Vui lòng nhập ít nhất một sản phẩm hợp lệ', 'warning');
+          return;
+        }
+        setLoading(true);
+        try {
+          await axios.post('/api/inventory/bulk', validItems);
+          fetchData();
+          setBulkInventory([{ name: '', quantity: 1, purchasePrice: 0, salePrice: 0 }]);
+          addToast('Nhập kho hàng loạt thành công', 'success');
+        } catch (error) {
+          addToast('Lỗi khi nhập kho: ' + (error.response?.data?.error || error.message), 'error');
+        } finally {
+          setLoading(false);
+        }
+      }, [bulkInventory, fetchData]);
+
+      const handleProductPriceUpdate = useCallback(async () => {
         setLoading(true);
         try {
           await Promise.all(
             Object.entries(productPrices).map(([id, salePrice]) =>
               axios.post('/api/inventory/price', { id, salePrice: parseInt(salePrice) || 0 })
-            )
+            );
           );
           setProductPrices({});
           fetchData();
-          showToast('Cập nhật giá sản phẩm thành công', 'success');
+          addToast('Cập nhật giá sản phẩm thành công', 'success');
         } catch (error) {
-          showToast('Lỗi khi cập nhật giá sản phẩm: ' + (error.response?.data?.error || error.message), 'error');
+          addToast('Lỗi khi cập nhật giá sản phẩm: ' + (error.response?.data?.error || error.message), 'error');
         } finally {
           setLoading(false);
         }
-      };
+      }, [productPrices, fetchData]);
 
-      const getRoomColor = (status) => {
-        switch (status) {
-          case 'occupied': return 'bg-red-500';
-          case 'vacant': return 'bg-green-500';
-          case 'dirty': return 'bg-yellow-500';
-          default: return 'bg-gray-500';
-        }
-      };
+      const getRoomColor = useCallback((status) => ({
+        vacant: 'bg-green-100 text-green-800',
+        occupied: 'bg-blue-100 text-blue-800',
+        dirty: 'bg-yellow-100 text-yellow-800',
+      }[status] || 'bg-gray-100 text-gray-800'), []);
 
-      const getCurrentHours = (checkInTime) => {
+      const getRoomIcon = useCallback((status) => ({
+        vacant: '✔️',
+        occupied: '👤',
+        dirty: '🧹',
+      }[status] || '❓'), []);
+
+      const getCurrentHours = useCallback((checkInTime) => {
         if (!checkInTime) return '0 giờ 0 phút';
-        const now = new Date();
-        const checkIn = new Date(checkInTime);
-        const totalMinutes = Math.round((now - checkIn) / (1000 * 60));
+        const totalMinutes = Math.round((new Date() - new Date(checkInTime)) / (1000 * 60));
         const hours = Math.floor(totalMinutes / 60);
         const minutes = totalMinutes % 60;
         return `${hours} giờ ${minutes} phút`;
-      };
+      }, []);
+
+      const filteredTransactions = useMemo(() => {
+        return transactions.filter((t) => {
+          const roomMatch = !filter.room || t.roomId === filter.room?.value;
+          const typeMatch = !filter.type || t.type === filter.type?.value;
+          const dateMatch = !dateRange[0] || !dateRange[1] ||
+            (new Date(t.checkOutTime) >= dateRange[0] && new Date(t.checkOutTime) <= dateRange[1]);
+          return roomMatch && typeMatch && dateMatch;
+        });
+      }, [transactions, filter, dateRange]);
+
+      const analytics = useMemo(() => {
+        const roomUsage = {};
+        const itemSales = {};
+        const hourlyRevenue = Array(24).fill(0);
+
+        transactions.forEach(t => {
+          roomUsage[t.roomId] = (roomUsage[t.roomId] || 0) + 1;
+          t.items.forEach(item => {
+            itemSales[item.itemId] = (itemSales[item.itemId] || 0) + item.quantity;
+          });
+          const hour = new Date(t.checkInTime).getHours();
+          hourlyRevenue[hour] += t.total;
+        });
+
+        const topRoom = Object.entries(roomUsage).sort((a, b) => b[1] - a[1])[0];
+        const topItem = Object.entries(itemSales).sort((a, b) => b[1] - a[1])[0];
+        const peakHour = hourlyRevenue.indexOf(Math.max(...hourlyRevenue));
+
+        return {
+          topRoom: topRoom ? { id: topRoom[0], count: topRoom[1] } : null,
+          topItem: topItem ? { id: topItem[0], count: topItem[1] } : null,
+          peakHour,
+        };
+      }, [transactions]);
+
+      const chartData = useMemo(() => ({
+        labels: ['Ngày', 'Tuần', 'Tháng'],
+        datasets: [{
+          label: [report.daily, report.weekly, report.monthly],
+          data: [report.daily, report.weekly, report.monthly],
+          backgroundColor: ['#2563eb', '#4a90e2', '#90cdf4'],
+        }],
+      ],
+      [report]);
 
       return (
-        <div className="min-h-screen bg-gray-100">
-          {/* Toast */}
-          {toast.show && <Toast message={toast.message} type={toast.type} onClose={() => setToast({ ...toast, show: false })} />}
+        <Suspense fallback={<div className="text-center p-4">Đang tải...</div>}>
+          <div className="min-h-screen bg-white">
+            <ToastContainer toasts={toasts} removeToast={removeToast} />
+            {invoice && <InvoicePopup invoice={invoice} onClose={() => setInvoice(null)} />}
 
-          {/* Invoice Popup */}
-          {invoice && (
-            <InvoicePopup
-              invoice={invoice}
-              onClose={() => setInvoice(null)}
-            />
-          )}
-
-          {/* Header */}
-          <header className="bg-blue-600 text-white p-4 shadow-md">
-            <div className="container mx-auto flex justify-between items-center">
-              <h1 className="text-2xl md:text-3xl font-bold">Quản Lý Nhà Nghỉ</h1>
-              {!isAdmin && (
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="password"
-                    placeholder="Nhập mã PIN Admin"
-                    value={pin}
-                    onChange={(e) => setPin(e.target.value)}
-                    className="border p-2 rounded text-gray-800"
-                  />
+            {/* Header */}
+            <header className="bg-blue-600 text-white p-4 shadow-lg">
+              <div className="container mx-auto flex flex-col sm:flex-row justify-between items-center">
+                <h1 className="text-2xl md:text-3xl font-bold mb-2 sm:mb-0">Quản Lý Nhà Nghỉ</h1>
+                {!isAdmin ? (
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="password"
+                      placeholder="Nhập mã PIN Admin"
+                      value={pin}
+                      onChange={(e) => setPin(e.target.value)}
+                      className="border p-2 rounded text-gray-800 w-full sm:w-auto"
+                    />
+                    <button
+                      onClick={handleAdminLogin}
+                      className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                    >
+                      Đăng nhập
+                    </button>
+                  </div>
+                ) : (
                   <button
-                    onClick={handleAdminLogin}
-                    className="btn-primary text-white px-4 py-2 rounded"
+                    onClick={() => setIsAdmin(false)}
+                    className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
                   >
-                    Đăng nhập
+                    Đăng xuất
+                  </button>
+                )}
+              </div>
+            </header>
+
+            {/* Main Content */}
+            <main className="container mx-auto p-4 md:p-6">
+              {loading && (
+                <div className="text-center text-blue-600 mb-4">
+                  <svg className="animate-spin h-5 w-5 inline mr-2" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                  </svg>
+                  Đang tải...
+                </div>
+              )}
+
+              {/* Danh sách phòng */}
+              <section className="mb-8 bg-white p-6 rounded-lg shadow-md">
+                <div className="flex flex-col sm:flex-row justify-between items-center mb-4">
+                  <h2 className="text-xl md:text-2xl font-semibold mb-2 sm:mb-0">Trạng Thái Phòng</h2>
+                  <button
+                    onClick={fetchData}
+                    className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                  >
+                    Làm mới
                   </button>
                 </div>
-              )}
-              {isAdmin && (
-                <button
-                  onClick={() => setIsAdmin(false)}
-                  className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
-                >
-                  Đăng xuất
-                </button>
-              )}
-            </div>
-          </header>
-
-          {/* Main Content */}
-          <main className="container mx-auto p-4 md:p-6">
-            {loading && (
-              <div className="text-center text-blue-600 mb-4">
-                <svg className="animate-spin h-5 w-5 inline mr-2" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                </svg>
-                Đang tải...
-              </div>
-            )}
-
-            {/* Danh sách phòng */}
-            <section className="mb-8 bg-white p-6 rounded-lg shadow-md">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl md:text-2xl font-semibold">Trạng Thái Phòng</h2>
-                <button
-                  onClick={fetchData}
-                  className="btn-primary text-white px-4 py-2 rounded"
-                >
-                  Làm mới
-                </button>
-              </div>
-              {['2', '3', '4'].map(floor => (
-                <div key={floor} className="mb-6">
-                  <h3 className="text-lg md:text-xl font-medium mb-2">Tầng {floor}</h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
-                    {rooms.filter(room => room.floor === floor).map(room => (
-                      <div
-                        key={room._id}
-                        className={`card p-4 rounded-lg ${getRoomColor(room.status)} text-white text-center cursor-pointer shadow-md`}
-                        onClick={() => setSelectedRoom(room)}
-                      >
-                        <div>Phòng {room.number}</div>
-                        {room.status === 'occupied' && (
-                          <div className="text-sm">
-                            {room.type === 'overnight' ? 'Qua đêm' : 'Nghỉ giờ'}
-                            <br />
-                            Vào: {new Date(room.checkInTime).toLocaleTimeString('vi-VN')}
-                            <br />
-                            Đã dùng: {getCurrentHours(room.checkInTime)}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </section>
-
-            {/* Modal Check-in/Check-out */}
-            {selectedRoom && (
-              <div className="fixed inset-0 modal-overlay flex items-center justify-center z-50">
-                <div className="bg-white p-6 rounded-lg shadow-xl max-w-md w-full">
-                  <h3 className="text-xl font-semibold mb-4">
-                    {selectedRoom.status === 'dirty' ? `Xác Nhận Dọn Phòng ${selectedRoom.number}` : `Quản Lý Phòng ${selectedRoom.number}`}
-                  </h3>
-                  {selectedRoom.status === 'dirty' ? (
-                    <div>
-                      <p className="mb-4">Phòng đang ở trạng thái cần dọn dẹp. Xác nhận chuyển sang trạng thái trống?</p>
-                      <div className="flex justify-end space-x-2">
-                        <button
-                          onClick={() => handleCleanRoom(selectedRoom._id)}
-                          className="btn-primary text-white px-4 py-2 rounded"
-                          disabled={loading}
+                {['2', '3', '4'].map(floor => (
+                  <div key={floor} className="mb-6">
+                    <h3 className="text-lg md:text-xl font-medium mb-2">Tầng {floor}</h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                      {rooms.filter(room => room.floor === floor).map(room => (
+                        <div
+                          key={room._id}
+                          className={`relative p-4 rounded-lg ${getRoomColor(room.status)} text-center cursor-pointer shadow-md hover:shadow-lg transition-shadow group`}
+                          onClick={() => setSelectedRoom(room)}
                         >
-                          Xác nhận
-                        </button>
-                        <button
-                          onClick={() => setSelectedRoom(null)}
-                          className="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600"
-                        >
-                          Đóng
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div>
-                      {selectedRoom.status === 'vacant' && (
-                        <>
-                          <div className="mb-4">
-                            <label className="block text-sm font-medium mb-1">Loại nghỉ:</label>
-                            <select
-                              value={checkInData.type}
-                              onChange={(e) => setCheckInData({ ...checkInData, type: e.target.value })}
-                              className="border p-2 w-full rounded"
-                            >
-                              <option value="hourly">Nghỉ giờ</option>
-                              <option value="overnight">Qua đêm</option>
-                            </select>
+                          <div className="flex items-center justify-center space-x-2">
+                            <span>{getRoomIcon(room.status)}</span>
+                            <div>Phòng {room.number}</div>
                           </div>
-                          {checkInData.type === 'overnight' && (
-                            <>
-                              <div className="mb-4">
-                                <label className="block text-sm font-medium mb-1">CCCD:</label>
-                                <input
-                                  type="text"
-                                  placeholder="Số CCCD"
-                                  value={checkInData.cccd}
-                                  onChange={(e) => setCheckInData({ ...checkInData, cccd: e.target.value })}
-                                  className="border p-2 w-full rounded"
-                                />
-                              </div>
-                              <div className="mb-4">
-                                <label className="block text-sm font-medium mb-1">Họ Tên:</label>
-                                <input
-                                  type="text"
-                                  placeholder="Họ và Tên"
-                                  value={checkInData.fullName}
-                                  onChange={(e) => setCheckInData({ ...checkInData, fullName: e.target.value })}
-                                  className="border p-2 w-full rounded"
-                                />
-                              </div>
-                            </>
+                          {room.status === 'occupied' && (
+                            <div className="text-sm mt-2">
+                              {room.type === 'overnight' ? 'Qua đêm' : 'Nghỉ giờ'}
+                              <br />
+                              Vào: {new Date(room.checkInTime).toLocaleTimeString('vi-VN')}
+                              <br />
+                              Đã dùng: {getCurrentHours(room.checkInTime)}
+                            </div>
                           )}
-                          <div className="mb-4">
-                            <label className="block text-sm font-medium mb-1">Chọn sản phẩm:</label>
-                            {inventory.map(item => (
-                              <div key={item._id} className="flex items-center mb-2">
-                                <input
-                                  type="number"
-                                  min="0"
-                                  max={item.quantity}
-                                  placeholder="Số lượng"
-                                  onChange={(e) => {
-                                    const quantity = parseInt(e.target.value) || 0;
-                                    const items = checkInData.items.filter(i => i.itemId !== item._id);
-                                    if (quantity > 0) {
-                                      items.push({ itemId: item._id, quantity });
-                                    }
-                                    setCheckInData({ ...checkInData, items });
-                                  }}
-                                  className="border p-2 w-20 mr-2 rounded"
-                                />
-                                <span>{item.name} (Tồn: {item.quantity})</span>
-                              </div>
-                            ))}
+                          <div className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded p-2 -top-10 left-1/2 transform -translate-x-1/2 z-10">
+                            {room.status === 'occupied'
+                              ? `Vào: ${new Date(room.checkInTime).toLocaleString('vi-VN')}, Loại: ${room.type === 'overnight' ? 'Qua đêm' : 'Nghỉ giờ'}`
+                              : `Trạng thái: ${room.status === 'vacant' ? 'Trống' : 'Cần dọn'}`}
                           </div>
-                        </>
-                      )}
-                      {selectedRoom.status === 'occupied' && (
-                        <>
-                          <div className="mb-4">
-                            <label className="block text-sm font-medium mb-1">Phụ thu (VND):</label>
-                            <input
-                              type="number"
-                              placeholder="Số tiền phụ thu"
-                              value={checkInData.surcharge.amount}
-                              onChange={(e) => setCheckInData({
-                                ...checkInData,
-                                surcharge: { ...checkInData.surcharge, amount: parseInt(e.target.value) || 0 }
-                              })}
-                              className="border p-2 w-full rounded"
-                            />
-                          </div>
-                          <div className="mb-4">
-                            <label className="block text-sm font-medium mb-1">Ghi chú phụ thu:</label>
-                            <input
-                              type="text"
-                              placeholder="Ghi chú"
-                              value={checkInData.surcharge.note}
-                              onChange={(e) => setCheckInData({
-                                ...checkInData,
-                                surcharge: { ...checkInData.surcharge, note: e.target.value }
-                              })}
-                              className="border p-2 w-full rounded"
-                            />
-                          </div>
-                        </>
-                      )}
-                      <div className="flex justify-end space-x-2">
-                        {selectedRoom.status === 'vacant' && (
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </section>
+
+              {/* Modal Check-in/Check-out */}
+              {selectedRoom && (
+                <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
+                  <div className="bg-white p-6 rounded-lg shadow-xl max-w-md w-full">
+                    <h3 className="text-xl font-semibold mb-4">
+                      {selectedRoom.status === 'dirty' ? `Xác Nhận Dọn Phòng ${selectedRoom.number}` : `Quản Lý Phòng ${selectedRoom.number}`}
+                    </h3>
+                    {selectedRoom.status === 'dirty' ? (
+                      <div>
+                        <p className="mb-4">Phòng cần dọn dẹp. Xác nhận chuyển sang trạng thái trống?</p>
+                        <div className="flex justify-end space-x-2">
                           <button
-                            onClick={() => handleCheckIn(selectedRoom._id)}
-                            className="btn-primary text-white px-4 py-2 rounded"
-                            disabled={loading || (checkInData.type === 'overnight' && (!checkInData.cccd || !checkInData.fullName))}
-                          >
-                            Check-In
-                          </button>
-                        )}
-                        {selectedRoom.status === 'occupied' && (
-                          <button
-                            onClick={() => handleCheckOut(selectedRoom._id)}
-                            className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
+                            onClick={() => handleCleanRoom(selectedRoom._id)}
+                            className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
                             disabled={loading}
                           >
-                            Check-Out
+                            Xác nhận
                           </button>
+                          <button
+                            onClick={() => setSelectedRoom(null)}
+                            className="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600"
+                          >
+                            Đóng
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        {selectedRoom.status === 'vacant' && (
+                          <>
+                            <div className="mb-4">
+                              <label className="block text-sm font-medium mb-1">Loại nghỉ:</label>
+                              <select
+                                value={checkInData.type}
+                                onChange={(e) => setCheckInData({ ...checkInData, type: e.target.value })}
+                                className="border p-2 w-full rounded"
+                              >
+                                <option value="hourly">Nghỉ giờ</option>
+                                <option value="overnight">Qua đêm</option>
+                              </select>
+                            </div>
+                            {checkInData.type === 'overnight' && (
+                              <>
+                                <div className="mb-4">
+                                  <label className="block text-sm font-medium mb-1">CCCD:</label>
+                                  <input
+                                    type="text"
+                                    placeholder="Số CCCD"
+                                    value={checkInData.cccd}
+                                    onChange={(e) => setCheckInData({ ...checkInData, cccd: e.target.value })}
+                                    className="border p-2 w-full rounded"
+                                  />
+                                </div>
+                                <div className="mb-4">
+                                  <label className="block text-sm font-medium mb-1">Họ Tên:</label>
+                                  <input
+                                    type="text"
+                                    placeholder="Họ và Tên"
+                                    value={checkInData.fullName}
+                                    onChange={(e) => setCheckInData({ ...checkInData, fullName: e.target.value })}
+                                    className="border p-2 w-full rounded"
+                                  />
+                                </div>
+                              </>
+                            )}
+                            <div className="mb-4">
+                              <label className="block text-sm font-medium mb-1">Chọn sản phẩm:</label>
+                              {inventory.map(item => (
+                                <div key={item._id} className="flex items-center mb-2">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max={item.quantity}
+                                    placeholder="Số lượng"
+                                    onChange={(e) => {
+                                      const quantity = parseInt(e.target.value) || 0;
+                                      const items = checkInData.items.filter(i => i.itemId !== item._id);
+                                      if (quantity > 0) items.push({ itemId: item._id, quantity });
+                                      setCheckInData({ ...checkInData, items });
+                                    }}
+                                    className="border p-2 w-20 mr-2 rounded"
+                                  />
+                                  <span>{item.name} (Tồn: {item.quantity})</span>
+                                </div>
+                              ))}
+                            </div>
+                          </>
                         )}
+                        {selectedRoom.status === 'occupied' && (
+                          <>
+                            <div className="mb-4">
+                              <label className="block text-sm font-medium mb-1">Phụ thu (VND):</label>
+                              <input
+                                type="number"
+                                placeholder="Số tiền phụ thu"
+                                value={checkInData.surcharge.amount}
+                                onChange={(e) => setCheckInData({
+                                  ...checkInData,
+                                  surcharge: { ...checkInData.surcharge, amount: parseInt(e.target.value) || 0 }
+                                })}
+                                className="border p-2 w-full rounded"
+                              />
+                            </div>
+                            <div className="mb-4">
+                              <label className="block text-sm font-medium mb-1">Ghi chú phụ thu:</label>
+                              <input
+                                type="text"
+                                placeholder="Ghi chú"
+                                value={checkInData.surcharge.note}
+                                onChange={(e) => setCheckInData({
+                                  ...checkInData,
+                                  surcharge: { ...checkInData.surcharge, note: e.target.value }
+                                })}
+                                className="border p-2 w-full rounded"
+                              />
+                            </div>
+                          </>
+                        )}
+                        <div className="flex justify-end space-x-2">
+                          {selectedRoom.status === 'vacant' && (
+                            <button
+                              onClick={() => handleCheckIn(selectedRoom._id)}
+                              className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                              disabled={loading || (checkInData.type === 'overnight' && (!checkInData.cccd || !checkInData.fullName))}
+                            >
+                              Check-In
+                            </button>
+                          )}
+                          {selectedRoom.status === 'occupied' && (
+                            <button
+                              onClick={() => handleCheckOut(selectedRoom._id)}
+                              className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
+                              disabled={loading}
+                            >
+                              Check-Out
+                            </button>
+                          )}
+                          <button
+                            onClick={() => setSelectedRoom(null)}
+                            className="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600"
+                          >
+                            Đóng
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Admin Panel */}
+              {isAdmin && (
+                <section className="mb-8 bg-white p-6 rounded-lg shadow-md">
+                  <h2 className="text-xl md:text-2xl font-semibold mb-4">Bảng Quản Trị</h2>
+                  <div className="flex flex-wrap border-b mb-4">
+                    {['prices', 'inventory', 'productPrices', 'transactions', 'analytics'].map(tab => (
+                      <button
+                        key={tab}
+                        className={`px-4 py-2 ${activeTab === tab ? 'border-b-2 border-blue-600' : ''}`}
+                        onClick={() => setActiveTab(tab)}
+                      >
+                        {tab === 'prices' ? 'Cài Đặt Giá' :
+                         tab === 'inventory' ? 'Nhập Kho' :
+                         tab === 'productPrices' ? 'Giá Sản Phẩm' :
+                         tab === 'transactions' ? 'Lịch Sử Giao Dịch' : 'Phân Tích'}
+                      </button>
+                    ))}
+                  </div>
+
+                  {activeTab === 'prices' && (
+                    <div>
+                      <h3 className="text-lg font-medium mb-2">Cài Đặt Giá</h3>
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-sm font-medium">Giá giờ đầu (VND):</label>
+                          <input
+                            type="number"
+                            value={prices.firstHour}
+                            onChange={(e) => setPrices({ ...prices, firstHour: parseInt(e.target.value) || 0 })}
+                            className="border p-2 w-full rounded"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium">Giá giờ tiếp theo (VND):</label>
+                          <input
+                            type="number"
+                            value={prices.extraHour}
+                            onChange={(e) => setPrices({ ...prices, extraHour: parseInt(e.target.value) || 0 })}
+                            className="border p-2 w-full rounded"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium">Giá qua đêm (VND):</label>
+                          <input
+                            type="number"
+                            value={prices.overnight}
+                            onChange={(e) => setPrices({ ...prices, overnight: parseInt(e.target.value) || 0 })}
+                            className="border p-2 w-full rounded"
+                          />
+                        </div>
                         <button
-                          onClick={() => setSelectedRoom(null)}
-                          className="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600"
+                          onClick={handlePriceUpdate}
+                          className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                          disabled={loading}
                         >
-                          Đóng
+                          Cập nhật giá
                         </button>
                       </div>
                     </div>
                   )}
-                </div>
-              </div>
-            )}
 
-            {/* Admin Panel */}
-            {isAdmin && (
-              <section className="mb-8 bg-white p-6 rounded-lg shadow-md">
-                <h2 className="text-xl md:text-2xl font-semibold mb-4">Bảng Quản Trị</h2>
-                <div className="flex border-b mb-4">
-                  <button
-                    className={`px-4 py-2 ${activeTab === 'prices' ? 'border-b-2 border-blue-600' : ''}`}
-                    onClick={() => setActiveTab('prices')}
-                  >
-                    Cài Đặt Giá
-                  </button>
-                  <button
-                    className={`px-4 py-2 ${activeTab === 'inventory' ? 'border-b-2 border-blue-600' : ''}`}
-                    onClick={() => setActiveTab('inventory')}
-                  >
-                    Nhập Kho
-                  </button>
-                  <button
-                    className={`px-4 py-2 ${activeTab === 'productPrices' ? 'border-b-2 border-blue-600' : ''}`}
-                    onClick={() => setActiveTab('productPrices')}
-                  >
-                    Giá Sản Phẩm
-                  </button>
-                </div>
-
-                {activeTab === 'prices' && (
-                  <div>
-                    <h3 className="text-lg font-medium mb-2">Cài Đặt Giá</h3>
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-sm font-medium">Giá giờ đầu (VND):</label>
+                  {activeTab === 'inventory' && (
+                    <div>
+                      <h3 className="text-lg font-medium mb-2">Nhập Kho</h3>
+                      <div className="mb-4">
+                        <label className="block text-sm font-medium mb-1">Nhập bằng Excel:</label>
                         <input
-                          type="number"
-                          value={prices.firstHour}
-                          onChange={(e) => setPrices({ ...prices, firstHour: parseInt(e.target.value) || 0 })}
+                          type="file"
+                          accept=".xlsx"
+                          onChange={handleExcelImport}
                           className="border p-2 w-full rounded"
                         />
+                        <p className="text-sm text-gray-500 mt-1">
+                          File Excel cần cột: Tên SP, Số lượng, Giá nhập.
+                        </p>
+                      </div>
+                      <div className="mb-4">
+                        <h4 className="text-md font-medium mb-2">Nhập thủ công:</h4>
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-sm font-medium">Tên sản phẩm:</label>
+                            <input
+                              type="text"
+                              value={manualInventory.name}
+                              onChange={(e) => setManualInventory({ ...manualInventory, name: e.target.value })}
+                              className="border p-2 w-full rounded"
+                              required
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium">Số lượng:</label>
+                            <input
+                              type="number"
+                              value={manualInventory.quantity}
+                              onChange={(e) => setManualInventory({ ...manualInventory, quantity: parseInt(e.target.value) || 0 })}
+                              className="border p-2 w-full rounded"
+                              min="0"
+                              required
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium">Giá nhập (VND):</label>
+                            <input
+                              type="number"
+                              value={manualInventory.purchasePrice}
+                              onChange={(e) => setManualInventory({ ...manualInventory, purchasePrice: parseInt(e.target.value) || 0 })}
+                              className="border p-2 w-full rounded"
+                              min="0"
+                              required
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium">Giá bán (VND, tùy chọn):</label>
+                            <input
+                              type="number"
+                              value={manualInventory.salePrice}
+                              onChange={(e) => setManualInventory({ ...manualInventory, salePrice: parseInt(e.target.value) || 0 })}
+                              className="border p-2 w-full rounded"
+                              min="0"
+                            />
+                          </div>
+                          <button
+                            onClick={handleManualInventory}
+                            className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                            disabled={loading}
+                          >
+                            Thêm sản phẩm
+                          </button>
+                        </div>
                       </div>
                       <div>
-                        <label className="block text-sm font-medium">Giá giờ tiếp theo (VND):</label>
-                        <input
-                          type="number"
-                          value={prices.extraHour}
-                          onChange={(e) => setPrices({ ...prices, extraHour: parseInt(e.target.value) || 0 })}
-                          className="border p-2 w-full rounded"
-                        />
+                        <h4 className="text-md font-medium mb-2">Nhập hàng loạt:</h4>
+                        {bulkInventory.map((item, index) => (
+                          <div key={index} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-2">
+                            <input
+                              type="text"
+                              placeholder="Tên sản phẩm"
+                              value={item.name}
+                              onChange={(e) => {
+                                const newItems = [...bulkInventory];
+                                newItems[index].name = e.target.value;
+                                setBulkInventory(newItems);
+                              }}
+                              className="border p-2 rounded"
+                            />
+                            <input
+                              type="number"
+                              placeholder="Số lượng"
+                              value={item.quantity}
+                              onChange={(e) => {
+                                const newItems = [...bulkInventory];
+                                newItems[index].quantity = parseInt(e.target.value) || 0;
+                                setBulkInventory(newItems);
+                              }}
+                              className="border p-2 rounded"
+                              min="0"
+                            />
+                            <input
+                              type="number"
+                              placeholder="Giá nhập"
+                              value={item.purchasePrice}
+                              onChange={(e) => {
+                                const newItems = [...bulkInventory];
+                                newItems[index].purchasePrice = parseInt(e.target.value) || 0;
+                                setBulkInventory(newItems);
+                              }}
+                              className="border p-2 rounded"
+                              min="0"
+                            />
+                            <input
+                              type="number"
+                              placeholder="Giá bán"
+                              value={item.salePrice}
+                              onChange={(e) => {
+                                const newItems = [...bulkInventory];
+                                newItems[index].salePrice = parseInt(e.target.value) || 0;
+                                setBulkInventory(newItems);
+                              }}
+                              className="border p-2 rounded"
+                              min="0"
+                            />
+                          </div>
+                        ))}
+                        <div className="flex space-x-2">
+                          <button
+                            onClick={() => setBulkInventory([...bulkInventory, { name: '', quantity: 1, purchasePrice: 0, salePrice: 0 }])}
+                            className="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600"
+                          >
+                            Thêm dòng
+                          </button>
+                          <button
+                            onClick={handleBulkInventory}
+                            className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                            disabled={loading}
+                          >
+                            Nhập kho
+                          </button>
+                        </div>
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium">Giá qua đêm (VND):</label>
-                        <input
-                          type="number"
-                          value={prices.overnight}
-                          onChange={(e) => setPrices({ ...prices, overnight: parseInt(e.target.value) || 0 })}
-                          className="border p-2 w-full rounded"
-                        />
+                    </div>
+                  )}
+
+                  {activeTab === 'productPrices' && (
+                    <div>
+                      <h3 className="text-lg font-medium mb-2">Cài Đặt Giá Sản Phẩm</h3>
+                      <div className="space-y-2">
+                        {inventory.map(item => (
+                          <div key={item._id} className="flex items-center p-2 bg-gray-50 rounded">
+                            <span className="flex-1">{item.name} (Tồn: {item.quantity})</span>
+                            {item.quantity < 10 && (
+                              <span className="text-yellow-500 mr-2">⚠ Sắp hết hàng</span>
+                            )}
+                            <input
+                              type="number"
+                              placeholder="Giá bán (VND)"
+                              value={productPrices[item._id] ?? item.salePrice ?? ''}
+                              onChange={(e) => setProductPrices({
+                                ...productPrices,
+                                [item._id]: e.target.value
+                              })}
+                              className="border p-2 w-32 rounded"
+                              min="0"
+                            />
+                            {!item.salePrice && <span className="text-red-500 ml-2">Chưa đặt giá</span>}
+                          </div>
+                        ))}
                       </div>
                       <button
-                        onClick={handlePriceUpdate}
-                        className="btn-primary text-white px-4 py-2 rounded"
-                        disabled={loading}
+                        onClick={handleProductPriceUpdate}
+                        className="bg-blue-500 text-white px-4 py-2 rounded mt-4 hover:bg-blue-600"
+                        disabled={loading || Object.keys(productPrices).length === 0}
                       >
                         Cập nhật giá
                       </button>
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {activeTab === 'inventory' && (
-                  <div>
-                    <h3 className="text-lg font-medium mb-2">Nhập Kho</h3>
-                    <div className="mb-4">
-                      <label className="block text-sm font-medium mb-1">Nhập bằng Excel:</label>
-                      <input
-                        type="file"
-                        accept=".xlsx"
-                        onChange={handleExcelImport}
-                        className="border p-2 w-full rounded"
-                      />
-                      <p className="text-sm text-gray-500 mt-1">
-                        File Excel cần có cột: Tên SP, Số lượng, Giá nhập (đơn giá).
-                      </p>
-                    </div>
+                  {activeTab === 'transactions' && (
                     <div>
-                      <h4 className="text-md font-medium mb-2">Nhập thủ công:</h4>
-                      <div className="space-y-4">
-                        <div>
-                          <label className="block text-sm font-medium">Tên sản phẩm:</label>
-                          <input
-                            type="text"
-                            value={manualInventory.name}
-                            onChange={(e) => setManualInventory({ ...manualInventory, name: e.target.value })}
+                      <h3 className="text-lg font-medium mb-2">Lịch Sử Giao Dịch</h3>
+                      <div className="mb-4 flex flex-col sm:flex-row gap-4">
+                        <div className="flex-1">
+                          <label className="block text-sm font-medium mb-1">Khoảng thời gian:</label>
+                          <DatePicker
+                            selectsRange
+                            startDate={dateRange[0]}
+                            endDate={dateRange[1]}
+                            onChange={setDateRange}
                             className="border p-2 w-full rounded"
-                            required
                           />
                         </div>
-                        <div>
-                          <label className="block text-sm font-medium">Số lượng:</label>
-                          <input
-                            type="number"
-                            value={manualInventory.quantity}
-                            onChange={(e) => setManualInventory({ ...manualInventory, quantity: parseInt(e.target.value) || 0 })}
-                            className="border p-2 w-full rounded"
-                            min="0"
-                            required
+                        <div className="flex-1">
+                          <label className="block text-sm font-medium mb-1">Phòng:</label>
+                          <Select
+                            options={rooms.map(room => ({ value: room._id, label: `Phòng ${room.number}` }))}
+                            value={filter.room}
+                            onChange={(option) => setFilter({ ...filter, room: option })}
+                            isClearable
+                            className="w-full"
                           />
                         </div>
-                        <div>
-                          <label className="block text-sm font-medium">Giá nhập (VND):</label>
-                          <input
-                            type="number"
-                            value={manualInventory.purchasePrice}
-                            onChange={(e) => setManualInventory({ ...manualInventory, purchasePrice: parseInt(e.target.value) || 0 })}
-                            className="border p-2 w-full rounded"
-                            min="0"
-                            required
+                        <div className="flex-1">
+                          <label className="block text-sm font-medium mb-1">Loại nghỉ:</label>
+                          <Select
+                            options={[
+                              { value: 'hourly', label: 'Nghỉ giờ' },
+                              { value: 'overnight', label: 'Qua đêm' },
+                            ]}
+                            value={filter.type}
+                            onChange={(option) => setFilter({ ...filter, type: option })}
+                            isClearable
+                            className="w-full"
                           />
                         </div>
-                        <div>
-                          <label className="block text-sm font-medium">Giá bán (VND, tùy chọn):</label>
-                          <input
-                            type="number"
-                            value={manualInventory.salePrice}
-                            onChange={(e) => setManualInventory({ ...manualInventory, salePrice: parseInt(e.target.value) || 0 })}
-                            className="border p-2 w-full rounded"
-                            min="0"
-                          />
-                        </div>
-                        <button
-                          onClick={handleManualInventory}
-                          className="btn-primary text-white px-4 py-2 rounded"
-                          disabled={loading}
-                        >
-                          Thêm sản phẩm
-                        </button>
                       </div>
-                    </div>
-                  </div>
-                )}
-
-                {activeTab === 'productPrices' && (
-                  <div>
-                    <h3 className="text-lg font-medium mb-2">Cài Đặt Giá Sản Phẩm</h3>
-                    <div className="space-y-2">
-                      {inventory.map(item => (
-                        <div key={item._id} className="flex items-center p-2 bg-gray-50 rounded">
-                          <span className="flex-1">{item.name} (Tồn: {item.quantity})</span>
-                          <input
-                            type="number"
-                            placeholder="Giá bán (VND)"
-                            value={productPrices[item._id] ?? item.salePrice ?? ''}
-                            onChange={(e) => setProductPrices({
-                              ...productPrices,
-                              [item._id]: e.target.value
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="bg-gray-100">
+                              <th className="p-2">Phòng</th>
+                              <th className="p-2">Thời gian vào</th>
+                              <th className="p-2">Thời gian ra</th>
+                              <th className="p-2">Loại</th>
+                              <th className="p-2">Tổng tiền</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filteredTransactions.map(tx => (
+                              const room = rooms.find(r => r._id === tx.roomId);
+                              return (
+                                <tr key={tx._id} className="border-b">
+                                  <td className="p-2">{room?.number || 'N/A'}</td>
+                                  <td className="p-2">{new Date(tx.checkInTime).toLocaleString('vi-VN')}</td>
+                                  <td className="p-2">{new Date(tx.checkOutTime).toLocaleString('vi-VN')}</td>
+                                  <td className="p-2">{tx.type === 'hourly' ? 'Nghỉ giờ' : 'Qua đêm'}</td>
+                                  <td className="p-2">{tx.total.toLocaleString('vi-VN')} VND</td>
+                                </tr>
+                              );
                             })}
-                            className="border p-2 w-32 rounded"
-                            min="0"
-                          />
-                          {!item.salePrice && <span className="text-red-500 ml-2">Chưa đặt giá</span>}
-                        </div>
-                      ))}
+                          </tbody>
+                        </table>
+                      </div>
+                </div>
+              )}
+
+              {activeTab === 'analytics' && (
+                <div>
+                  <h3 className="text-lg font-medium mb-2">Phân tích</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div className="bg-gray-100 p-4 rounded-lg">
+                      <h4 className="font-medium">Phòng sử dụng nhiều nhất</h4>
+                      <p>{analytics.topRoom ? `Phòng ${rooms.find(r => r._id === analytics.topRoom.id)?.number} (${analytics.topRoom.count} lượt)` : 'Chưa có dữ liệu'}</p>
                     </div>
-                    <button
-                      onClick={handleProductPriceUpdate}
-                      className="btn-primary text-white px-4 py-2 rounded mt-4"
-                      disabled={loading || Object.keys(productPrices).length === 0}
-                    >
-                      Xác nhận cập nhật giá
-                    </button>
+                    <div className="bg-gray-100 p-4 rounded-lg">
+                      <h4 className="font-medium">Sản phẩm bán chạy</h4>
+                      <p>{analytics.topItem ? `${inventory.find(i => i._id === analytics.topItem.id)?.name} (${analytics.topItem.count} đơn vị)` : 'Chưa có dữ liệu'}</p>
+                    </div>
+                    <div className="bg-gray-100 p-4 rounded-lg">
+                      <h4 className="font-medium">Giờ cao điểm</h4>
+                      <p>{analytics.peakHour !== undefined ? `${analytics.peakHour}:00 - ${analytics.peakHour + 1}:00` : 'Chưa có dữ liệu'}</p>
+                    </div>
                   </div>
-                )}
-              </section>
-            )}
-
-            {/* Báo cáo */}
-            <section className="bg-white p-6 rounded-lg shadow-md">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl md:text-2xl font-semibold">Báo Cáo Thu Chi</h2>
-                <button
-                  onClick={fetchData}
-                  className="btn-primary text-white px-4 py-2 rounded"
-                >
-                  Làm mới
-                </button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="card bg-blue-50 p-4 rounded-lg shadow">
-                  <h3 className="text-lg font-medium">Doanh thu ngày</h3>
-                  <p className="text-2xl">{report.daily.toLocaleString('vi-VN')} VND</p>
                 </div>
-                <div className="card bg-blue-50 p-4 rounded-lg shadow">
-                  <h3 className="text-lg font-medium">Doanh thu tuần</h3>
-                  <p className="text-2xl">{report.weekly.toLocaleString('vi-VN')} VND</p>
-                </div>
-                <div className="card bg-blue-50 p-4 rounded-lg shadow">
-                  <h3 className="text-lg font-medium">Doanh thu tháng</h3>
-                  <p className="text-2xl">{report.monthly.toLocaleString('vi-VN')} VND</p>
-                </div>
-              </div>
+              )}
             </section>
-          </main>
-        </div>
-      );
-    };
+          )}
+          
+          {/* Báo cáo */}
+          <section className="mb-8 bg-white p-6 rounded-lg shadow-md">
+            <div className="flex flex-col sm:flex-row justify-between items-center mb-4">
+              <h2 className="text-xl md:text-2xl font-semibold mb-2 sm:mb-0">Báo Cáo Thu Chi</h2>
+              <button
+                onClick={fetchData}
+                className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+              >
+                Làm mới
+              </button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+              <div className="bg-gray-100 p-4 rounded-lg shadow">
+                <h3 className="text-lg font-medium">Doanh thu ngày</h3>
+                <p className="text-2xl">{report.daily.toLocaleString('vi-VN')} VND</p>
+              </div>
+              <div className="bg-gray-100 p-4 rounded-lg shadow">
+                <h3 className="text-lg font-medium">Doanh thu tuần</h3>
+                <p className="text-2xl">{report.weekly.toLocaleString('vi-VN')} VND</p>
+              </div>
+              <div className="bg-gray-100 p-4 rounded-lg shadow">
+                <h3 className="text-lg font-medium">Doanh thu tháng</h3>
+                <p className="text-2xl">{report.monthly.toLocaleString('vi-VN')} VND</p>
+              </div>
+            </div>
+            <canvas id="myChart" className="max-w-full"></canvas>
+            <script type="text/babel">
+              useEffect(() => {
+                const ctx = document.getElementById('myChart').getContext('2d');
+                const chart = new Chart(ctx, {
+                  type: 'bar',
+                  data: {
+                    labels: ['Ngày', 'Tuần', 'Tháng'],
+                    datasets: [{
+                      label: 'Doanh thu (VND)',
+                      data: [{report.daily}, {report.weekly}, {report.monthly}],
+                      backgroundColor: ['#2563eb', '#4a90e2', '#90cdf4'],
+                    }],
+                  },
+                  options: {
+                    responsive: true,
+                    scales: {
+                      y: { beginAtZero: true },
+                    },
+                  },
+                });
+                return () => chart.destroy();
+              }, [report]);
+            </script>
+          </section>
+        </main>
+      </div>
+    </Suspense>
+  );
+});
 
-    ReactDOM.render(<App />, document.getElementById('root'));
-  </script>
+ReactDOM.render(<App />, document.getElementById('root'));
+</script>
+<style type="text/css">
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .print-content, .print-content * {
+    visibility: visible;
+  }
+  .print-content {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+</style>
 </body>
 </html>
