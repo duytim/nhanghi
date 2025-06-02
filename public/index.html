@@ -9,6 +9,14 @@
   <script src="https://cdn.jsdelivr.net/npm/axios@1.6.8/dist/axios.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.22.9/babel.min.js"></script>
+  <style>
+    body { background-color: #f3f4f6; }
+    .modal-overlay { background: rgba(0, 0, 0, 0.7); }
+    .card { transition: transform 0.2s; }
+    .card:hover { transform: translateY(-2px); }
+    .btn-primary { background-color: #2563eb; }
+    .btn-primary:hover { background-color: #1e40af; }
+  </style>
 </head>
 <body>
   <div id="root"></div>
@@ -24,60 +32,60 @@
       const [prices, setPrices] = useState({ firstHour: 90000, extraHour: 20000, overnight: 200000 });
       const [report, setReport] = useState({ daily: 0, weekly: 0, monthly: 0 });
       const [checkInData, setCheckInData] = useState({ items: [], surcharge: { amount: 0, note: '' } });
+      const [loading, setLoading] = useState(false);
+      const [activeTab, setActiveTab] = useState('prices');
+      const [manualInventory, setManualInventory] = useState({ name: '', quantity: 0, purchasePrice: 0 });
 
       useEffect(() => {
-        fetchRooms();
-        fetchInventory();
-        fetchReports();
+        fetchData();
       }, []);
 
-      const fetchRooms = async () => {
+      const fetchData = async () => {
+        setLoading(true);
         try {
-          const response = await axios.get('/api/rooms');
-          setRooms(response.data);
+          const [roomsRes, inventoryRes, reportRes] = await Promise.all([
+            axios.get('/api/rooms'),
+            axios.get('/api/inventory'),
+            axios.get('/api/reports'),
+          ]);
+          setRooms(roomsRes.data);
+          setInventory(inventoryRes.data);
+          setReport(reportRes.data);
         } catch (error) {
-          console.error('Lỗi khi lấy danh sách phòng:', error);
-        }
-      };
-
-      const fetchInventory = async () => {
-        try {
-          const response = await axios.get('/api/inventory');
-          setInventory(response.data);
-        } catch (error) {
-          console.error('Lỗi khi lấy danh sách kho:', error);
-        }
-      };
-
-      const fetchReports = async () => {
-        try {
-          const response = await axios.get('/api/reports');
-          setReport(response.data);
-        } catch (error) {
-          console.error('Lỗi khi lấy báo cáo:', error);
+          console.error('Lỗi khi lấy dữ liệu:', error);
+          alert('Lỗi khi lấy dữ liệu: ' + error.message);
+        } finally {
+          setLoading(false);
         }
       };
 
       const handleCheckIn = async (roomId) => {
+        setLoading(true);
         try {
           await axios.post('/api/checkin', { roomId, items: checkInData.items, checkInTime: new Date() });
-          fetchRooms();
+          fetchData();
           setCheckInData({ items: [], surcharge: { amount: 0, note: '' } });
           setSelectedRoom(null);
+          alert('Check-in thành công');
         } catch (error) {
           alert('Lỗi khi check-in: ' + error.response?.data?.error || error.message);
+        } finally {
+          setLoading(false);
         }
       };
 
       const handleCheckOut = async (roomId) => {
+        setLoading(true);
         try {
           const response = await axios.post('/api/checkout', { roomId, surcharge: checkInData.surcharge });
           alert(`Hóa đơn: ${response.data.total.toLocaleString('vi-VN')} VND`);
-          fetchRooms();
+          fetchData();
           setCheckInData({ items: [], surcharge: { amount: 0, note: '' } });
           setSelectedRoom(null);
         } catch (error) {
           alert('Lỗi khi check-out: ' + error.response?.data?.error || error.message);
+        } finally {
+          setLoading(false);
         }
       };
 
@@ -91,24 +99,50 @@
       };
 
       const handlePriceUpdate = async () => {
+        setLoading(true);
         try {
           await axios.post('/api/prices', prices);
           alert('Cập nhật giá thành công');
         } catch (error) {
           alert('Lỗi khi cập nhật giá: ' + error.response?.data?.error || error.message);
+        } finally {
+          setLoading(false);
         }
       };
 
       const handleExcelImport = async (event) => {
+        setLoading(true);
         try {
           const file = event.target.files[0];
           const formData = new FormData();
           formData.append('file', file);
           await axios.post('/api/inventory/import', formData);
-          fetchInventory();
+          fetchData();
           alert('Nhập kho thành công');
         } catch (error) {
           alert('Lỗi khi nhập kho: ' + error.response?.data?.error || error.message);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const handleManualInventory = async () => {
+        setLoading(true);
+        try {
+          await axios.post('/api/inventory/price', {
+            id: manualInventory.id || null,
+            name: manualInventory.name,
+            quantity: manualInventory.quantity,
+            purchasePrice: manualInventory.purchasePrice,
+            salePrice: manualInventory.salePrice || 0,
+          });
+          fetchData();
+          setManualInventory({ name: '', quantity: 0, purchasePrice: 0, salePrice: 0 });
+          alert('Thêm sản phẩm thủ công thành công');
+        } catch (error) {
+          alert('Lỗi khi thêm sản phẩm: ' + error.response?.data?.error || error.message);
+        } finally {
+          setLoading(false);
         }
       };
 
@@ -122,169 +156,340 @@
       };
 
       return (
-        <div className="container mx-auto p-4">
-          <h1 className="text-3xl font-bold mb-4">Quản Lý Nhà Nghỉ</h1>
-
-          {/* Đăng nhập Admin */}
-          {!isAdmin && (
-            <div className="mb-4">
-              <input
-                type="password"
-                placeholder="Nhập mã PIN Admin"
-                value={pin}
-                onChange={(e) => setPin(e.target.value)}
-                className="border p-2 mr-2 rounded"
-              />
-              <button onClick={handleAdminLogin} className="bg-blue-500 text-white p-2 rounded">Đăng nhập</button>
+        <div className="min-h-screen bg-gray-100">
+          {/* Header */}
+          <header className="bg-blue-600 text-white p-4 shadow-md">
+            <div className="container mx-auto flex justify-between items-center">
+              <h1 className="text-2xl md:text-3xl font-bold">Quản Lý Nhà Nghỉ</h1>
+              {!isAdmin && (
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="password"
+                    placeholder="Nhập mã PIN Admin"
+                    value={pin}
+                    onChange={(e) => setPin(e.target.value)}
+                    className="border p-2 rounded text-gray-800"
+                  />
+                  <button
+                    onClick={handleAdminLogin}
+                    className="btn-primary text-white px-4 py-2 rounded"
+                  >
+                    Đăng nhập
+                  </button>
+                </div>
+              )}
+              {isAdmin && (
+                <button
+                  onClick={() => setIsAdmin(false)}
+                  className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
+                >
+                  Đăng xuất
+                </button>
+              )}
             </div>
-          )}
+          </header>
 
-          {/* Danh sách phòng */}
-          <div className="mb-8">
-            <h2 className="text-2xl font-semibold mb-2">Trạng Thái Phòng</h2>
-            {['2', '3', '4'].map(floor => (
-              <div key={floor} className="mb-4">
-                <h3 className="text-xl font-medium">Tầng {floor}</h3>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
-                  {rooms.filter(room => room.floor === floor).map(room => (
-                    <div
-                      key={room._id}
-                      className={`p-4 rounded ${getRoomColor(room.status)} text-white cursor-pointer text-center`}
-                      onClick={() => setSelectedRoom(room)}
+          {/* Main Content */}
+          <main className="container mx-auto p-4 md:p-6">
+            {loading && (
+              <div className="text-center text-blue-600 mb-4">
+                <svg className="animate-spin h-5 w-5 inline mr-2" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+                Đang tải...
+              </div>
+            )}
+
+            {/* Danh sách phòng */}
+            <section className="mb-8 bg-white p-6 rounded-lg shadow-md">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl md:text-2xl font-semibold">Trạng Thái Phòng</h2>
+                <button
+                  onClick={fetchData}
+                  className="btn-primary text-white px-4 py-2 rounded"
+                >
+                  Làm mới
+                </button>
+              </div>
+              {['2', '3', '4'].map(floor => (
+                <div key={floor} className="mb-6">
+                  <h3 className="text-lg md:text-xl font-medium mb-2">Tầng {floor}</h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
+                    {rooms.filter(room => room.floor === floor).map(room => (
+                      <div
+                        key={room._id}
+                        className={`card p-4 rounded-lg ${getRoomColor(room.status)} text-white text-center cursor-pointer shadow-md`}
+                        onClick={() => setSelectedRoom(room)}
+                      >
+                        Phòng {room.number}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </section>
+
+            {/* Modal Check-in/Check-out */}
+            {selectedRoom && (
+              <div className="fixed inset-0 modal-overlay flex items-center justify-center z-50">
+                <div className="bg-white p-6 rounded-lg shadow-xl max-w-md w-full">
+                  <h3 className="text-xl font-semibold mb-4">Quản Lý Phòng {selectedRoom.number}</h3>
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium mb-1">Chọn sản phẩm:</label>
+                    <select
+                      multiple
+                      onChange={(e) => setCheckInData({
+                        ...checkInData,
+                        items: Array.from(e.target.selectedOptions, option => ({
+                          itemId: option.value,
+                          quantity: 1,
+                        }))
+                      })}
+                      className="border p-2 w-full rounded"
                     >
-                      Phòng {room.number}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Modal Check-in/Check-out */}
-          {selectedRoom && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-              <div className="bg-white p-6 rounded max-w-md w-full">
-                <h3 className="text-xl mb-4">Quản Lý Phòng {selectedRoom.number}</h3>
-                <select
-                  multiple
-                  onChange={(e) => setCheckInData({
-                    ...checkInData,
-                    items: Array.from(e.target.selectedOptions, option => ({
-                      itemId: option.value,
-                      quantity: 1,
-                    }))
-                  })}
-                  className="border p-2 mb-4 w-full"
-                >
-                  {inventory.map(item => (
-                    <option key={item._id} value={item._id}>
-                      {item.name} (Tồn: {item.quantity}, Giá: {item.salePrice ? item.salePrice.toLocaleString('vi-VN') : 'Chưa đặt'})
-                    </option>
-                  ))}
-                </select>
-                <div className="mb-4">
-                  <input
-                    type="number"
-                    placeholder="Số tiền phụ thu (VND)"
-                    value={checkInData.surcharge.amount}
-                    onChange={(e) => setCheckInData({
-                      ...checkInData,
-                      surcharge: { ...checkInData.surcharge, amount: parseInt(e.target.value) || 0 }
-                    })}
-                    className="border p-2 mb-2 w-full"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Ghi chú phụ thu"
-                    value={checkInData.surcharge.note}
-                    onChange={(e) => setCheckInData({
-                      ...checkInData,
-                      surcharge: { ...checkInData.surcharge, note: e.target.value }
-                    })}
-                    className="border p-2 w-full"
-                  />
-                </div>
-                <button
-                  onClick={() => handleCheckIn(selectedRoom._id)}
-                  className="bg-green-500 text-white p-2 rounded mr-2"
-                >
-                  Check-In
-                </button>
-                <button
-                  onClick={() => handleCheckOut(selectedRoom._id)}
-                  className="bg-red-500 text-white p-2 rounded mr-2"
-                >
-                  Check-Out
-                </button>
-                <button
-                  onClick={() => setSelectedRoom(null)}
-                  className="bg-gray-500 text-white p-2 rounded"
-                >
-                  Đóng
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Admin Panel */}
-          {isAdmin && (
-            <div className="mb-8">
-              <h2 className="text-2xl font-semibold mb-2">Bảng Quản Trị</h2>
-              <div className="mb-4">
-                <h3 className="text-xl">Cài Đặt Giá</h3>
-                <input
-                  type="number"
-                  placeholder="Giá giờ đầu (VND)"
-                  value={prices.firstHour}
-                  onChange={(e) => setPrices({ ...prices, firstHour: parseInt(e.target.value) || 0 })}
-                  className="border p-2 mr-2 mb-2 w-full"
-                />
-                <input
-                  type="number"
-                  placeholder="Giá giờ tiếp theo (VND)"
-                  value={prices.extraHour}
-                  onChange={(e) => setPrices({ ...prices, extraHour: parseInt(e.target.value) || 0 })}
-                  className="border p-2 mr-2 mb-2 w-full"
-                />
-                <input
-                  type="number"
-                  placeholder="Giá qua đêm (VND)"
-                  value={prices.overnight}
-                  onChange={(e) => setPrices({ ...prices, overnight: parseInt(e.target.value) || 0 })}
-                  className="border p-2 mr-2 mb-2 w-full"
-                />
-                <button onClick={handlePriceUpdate} className="bg-blue-500 text-white p-2 rounded">Cập nhật giá</button>
-              </div>
-              <div>
-                <h3 className="text-xl">Nhập Kho (Excel)</h3>
-                <input type="file" accept=".xlsx" onChange={handleExcelImport} className="mb-4" />
-              </div>
-              <div>
-                <h3 className="text-xl">Cài Đặt Giá Sản Phẩm</h3>
-                {inventory.map(item => (
-                  <div key={item._id} className="flex items-center mb-2">
-                    <span className="mr-2">{item.name} (Tồn: {item.quantity})</span>
+                      {inventory.map(item => (
+                        <option key={item._id} value={item._id}>
+                          {item.name} (Tồn: {item.quantity}, Giá: {item.salePrice ? item.salePrice.toLocaleString('vi-VN') : 'Chưa đặt'})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium mb-1">Phụ thu (VND):</label>
                     <input
                       type="number"
-                      placeholder="Giá bán (VND)"
-                      defaultValue={item.salePrice}
-                      onBlur={(e) => axios.post('/api/inventory/price', { id: item._id, salePrice: parseInt(e.target.value) || 0 })}
-                      className="border p-2 w-32"
+                      placeholder="Số tiền phụ thu"
+                      value={checkInData.surcharge.amount}
+                      onChange={(e) => setCheckInData({
+                        ...checkInData,
+                        surcharge: { ...checkInData.surcharge, amount: parseInt(e.target.value) || 0 }
+                      })}
+                      className="border p-2 w-full rounded"
                     />
-                    {!item.salePrice && <span className="text-red-500 ml-2">Chưa đặt giá</span>}
                   </div>
-                ))}
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium mb-1">Ghi chú phụ thu:</label>
+                    <input
+                      type="text"
+                      placeholder="Ghi chú"
+                      value={checkInData.surcharge.note}
+                      onChange={(e) => setCheckInData({
+                        ...checkInData,
+                        surcharge: { ...checkInData.surcharge, note: e.target.value }
+                      })}
+                      className="border p-2 w-full rounded"
+                    />
+                  </div>
+                  <div className="flex justify-end space-x-2">
+                    <button
+                      onClick={() => handleCheckIn(selectedRoom._id)}
+                      className="btn-primary text-white px-4 py-2 rounded"
+                      disabled={loading}
+                    >
+                      Check-In
+                    </button>
+                    <button
+                      onClick={() => handleCheckOut(selectedRoom._id)}
+                      className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
+                      disabled={loading}
+                    >
+                      Check-Out
+                    </button>
+                    <button
+                      onClick={() => setSelectedRoom(null)}
+                      className="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600"
+                    >
+                      Đóng
+                    </button>
+                  </div>
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Báo cáo */}
-          <div>
-            <h2 className="text-2xl font-semibold mb-2">Báo Cáo Thu Chi</h2>
-            <p>Doanh thu ngày: {report.daily.toLocaleString('vi-VN')} VND</p>
-            <p>Doanh thu tuần: {report.weekly.toLocaleString('vi-VN')} VND</p>
-            <p>Doanh thu tháng: {report.monthly.toLocaleString('vi-VN')} VND</p>
-          </div>
+            {/* Admin Panel */}
+            {isAdmin && (
+              <section className="mb-8 bg-white p-6 rounded-lg shadow-md">
+                <h2 className="text-xl md:text-2xl font-semibold mb-4">Bảng Quản Trị</h2>
+                <div className="flex border-b mb-4">
+                  <button
+                    className={`px-4 py-2 ${activeTab === 'prices' ? 'border-b-2 border-blue-600' : ''}`}
+                    onClick={() => setActiveTab('prices')}
+                  >
+                    Cài Đặt Giá
+                  </button>
+                  <button
+                    className={`px-4 py-2 ${activeTab === 'inventory' ? 'border-b-2 border-blue-600' : ''}`}
+                    onClick={() => setActiveTab('inventory')}
+                  >
+                    Nhập Kho
+                  </button>
+                  <button
+                    className={`px-4 py-2 ${activeTab === 'productPrices' ? 'border-b-2 border-blue-600' : ''}`}
+                    onClick={() => setActiveTab('productPrices')}
+                  >
+                    Giá Sản Phẩm
+                  </button>
+                </div>
+
+                {activeTab === 'prices' && (
+                  <div>
+                    <h3 className="text-lg font-medium mb-2">Cài Đặt Giá</h3>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium">Giá giờ đầu (VND):</label>
+                        <input
+                          type="number"
+                          value={prices.firstHour}
+                          onChange={(e) => setPrices({ ...prices, firstHour: parseInt(e.target.value) || 0 })}
+                          className="border p-2 w-full rounded"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium">Giá giờ tiếp theo (VND):</label>
+                        <input
+                          type="number"
+                          value={prices.extraHour}
+                          onChange={(e) => setPrices({ ...prices, extraHour: parseInt(e.target.value) || 0 })}
+                          className="border p-2 w-full rounded"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium">Giá qua đêm (VND):</label>
+                        <input
+                          type="number"
+                          value={prices.overnight}
+                          onChange={(e) => setPrices({ ...prices, overnight: parseInt(e.target.value) || 0 })}
+                          className="border p-2 w-full rounded"
+                        />
+                      </div>
+                      <button
+                        onClick={handlePriceUpdate}
+                        className="btn-primary text-white px-4 py-2 rounded"
+                        disabled={loading}
+                      >
+                        Cập nhật giá
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'inventory' && (
+                  <div>
+                    <h3 className="text-lg font-medium mb-2">Nhập Kho</h3>
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium mb-1">Nhập bằng Excel:</label>
+                      <input
+                        type="file"
+                        accept=".xlsx"
+                        onChange={handleExcelImport}
+                        className="border p-2 w-full rounded"
+                      />
+                      <p className="text-sm text-gray-500 mt-1">
+                        File Excel cần có cột: Tên SP, Số lượng, Giá nhập (đơn giá).
+                      </p>
+                    </div>
+                    <div>
+                      <h4 className="text-md font-medium mb-2">Nhập thủ công:</h4>
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-sm font-medium">Tên sản phẩm:</label>
+                          <input
+                            type="text"
+                            value={manualInventory.name}
+                            onChange={(e) => setManualInventory({ ...manualInventory, name: e.target.value })}
+                            className="border p-2 w-full rounded"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium">Số lượng:</label>
+                          <input
+                            type="number"
+                            value={manualInventory.quantity}
+                            onChange={(e) => setManualInventory({ ...manualInventory, quantity: parseInt(e.target.value) || 0 })}
+                            className="border p-2 w-full rounded"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium">Giá nhập (VND):</label>
+                          <input
+                            type="number"
+                            value={manualInventory.purchasePrice}
+                            onChange={(e) => setManualInventory({ ...manualInventory, purchasePrice: parseInt(e.target.value) || 0 })}
+                            className="border p-2 w-full rounded"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium">Giá bán (VND, tùy chọn):</label>
+                          <input
+                            type="number"
+                            value={manualInventory.salePrice}
+                            onChange={(e) => setManualInventory({ ...manualInventory, salePrice: parseInt(e.target.value) || 0 })}
+                            className="border p-2 w-full rounded"
+                          />
+                        </div>
+                        <button
+                          onClick={handleManualInventory}
+                          className="btn-primary text-white px-4 py-2 rounded"
+                          disabled={loading || !manualInventory.name || !manualInventory.quantity || !manualInventory.purchasePrice}
+                        >
+                          Thêm sản phẩm
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'productPrices' && (
+                  <div>
+                    <h3 className="text-lg font-medium mb-2">Cài Đặt Giá Sản Phẩm</h3>
+                    <div className="space-y-2">
+                      {inventory.map(item => (
+                        <div key={item._id} className="flex items-center p-2 bg-gray-50 rounded">
+                          <span className="flex-1">{item.name} (Tồn: {item.quantity})</span>
+                          <input
+                            type="number"
+                            placeholder="Giá bán (VND)"
+                            defaultValue={item.salePrice}
+                            onBlur={(e) => axios.post('/api/inventory/price', { id: item._id, salePrice: parseInt(e.target.value) || 0 })}
+                            className="border p-2 w-32 rounded"
+                          />
+                          {!item.salePrice && <span className="text-red-500 ml-2">Chưa đặt giá</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* Báo cáo */}
+            <section className="bg-white p-6 rounded-lg shadow-md">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl md:text-2xl font-semibold">Báo Cáo Thu Chi</h2>
+                <button
+                  onClick={fetchData}
+                  className="btn-primary text-white px-4 py-2 rounded"
+                >
+                  Làm mới
+                </button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="card bg-blue-50 p-4 rounded-lg shadow">
+                  <h3 className="text-lg font-medium">Doanh thu ngày</h3>
+                  <p className="text-2xl">{report.daily.toLocaleString('vi-VN')} VND</p>
+                </div>
+                <div className="card bg-blue-50 p-4 rounded-lg shadow">
+                  <h3 className="text-lg font-medium">Doanh thu tuần</h3>
+                  <p className="text-2xl">{report.weekly.toLocaleString('vi-VN')} VND</p>
+                </div>
+                <div className="card bg-blue-50 p-4 rounded-lg shadow">
+                  <h3 className="text-lg font-medium">Doanh thu tháng</h3>
+                  <p className="text-2xl">{report.monthly.toLocaleString('vi-VN')} VND</p>
+                </div>
+              </div>
+            </section>
+          </main>
         </div>
       );
     };
