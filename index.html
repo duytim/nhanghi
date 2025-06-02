@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Quản Lý Phòng</title>
+  <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.development.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.development.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/babel@7.22.5/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.4.0/dist/axios.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    const App = () => {
+      const [rooms, setRooms] = useState([]);
+      const [inventory, setInventory] = useState([]);
+      const [isAdmin, setIsAdmin] = useState(false);
+      const [adminPass, setAdminPass] = useState("");
+      const [prices, setPrices] = useState({ hourly: 90000, extraHourly: 20000, overnight: 200000 });
+      const [reports, setReports] = useState({ daily: 0, weekly: 0, monthly: 0 });
+      const [selectedRoom, setSelectedRoom] = useState(null);
+      const [extraItems, setExtraItems] = useState([]);
+      const [additionalFee, setAdditionalFee] = useState({ amount: 0, note: "" });
+
+      useEffect(() => {
+        fetchRooms();
+        fetchInventory();
+        fetchReports();
+      }, []);
+
+      const fetchRooms = async () => {
+        const response = await axios.get("/api/rooms");
+        setRooms(response.data);
+      };
+
+      const fetchInventory = async () => {
+        const response = await axios.get("/api/inventory");
+        setInventory(response.data);
+      };
+
+      const fetchReports = async () => {
+        const response = await axios.get("/api/reports");
+        setReports(response.data);
+      };
+
+      const handleAdminLogin = () => {
+        if (adminPass === "123456") {
+          setIsAdmin(true);
+        } else {
+          alert("Mật khẩu sai!");
+        }
+      };
+
+      const handleCheckIn = async (roomId) => {
+        const response = await axios.post("/api/checkin", {
+          roomId,
+          checkInTime: new Date(),
+          extraItems,
+          additionalFee,
+        });
+        setSelectedRoom(null);
+        setExtraItems([]);
+        setAdditionalFee({ amount: 0, note: "" });
+        fetchRooms();
+        fetchReports();
+      };
+
+      const handleCheckOut = async (roomId) => {
+        const response = await axios.post("/api/checkout", { roomId });
+        fetchRooms();
+        fetchReports();
+      };
+
+      const handleImportExcel = (e) => {
+        const file = e.target.files[0];
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+          const data = new Uint8Array(event.target.result);
+          const workbook = XLSX.read(data, { type: "array" });
+          const sheet = workbook.Sheets[workbook.SheetNames[0]];
+          const json = XLSX.utils.sheet_to_json(sheet);
+          await axios.post("/api/inventory/import", json);
+          fetchInventory();
+        };
+        reader.readAsArrayBuffer(file);
+      };
+
+      const handlePriceUpdate = async (itemId, price) => {
+        await axios.post("/api/inventory/price", { itemId, price });
+        fetchInventory();
+      };
+
+      const RoomCard = ({ room }) => {
+        const statusColor = room.status === "Trống" ? "bg-green-200" : room.status === "Có khách" ? "bg-red-200" : "bg-yellow-200";
+        return (
+          <div className={`p-4 rounded-lg shadow-md ${statusColor}`}>
+            <h3 className="text-lg font-bold">Phòng {room.roomNumber}</h3>
+            <p>Trạng thái: {room.status}</p>
+            {room.status === "Có khách" && (
+              <>
+                <p>Check-in: {new Date(room.checkInTime).toLocaleString()}</p>
+                <button
+                  onClick={() => handleCheckOut(room._id)}
+                  className="mt-2 bg-red-500 text-white px-4 py-2 rounded"
+                >
+                  Check-out
+                </button>
+              </>
+            )}
+            {room.status === "Trống" && (
+              <button
+                onClick={() => setSelectedRoom(room)}
+                className="mt-2 bg-blue-500 text-white px-4 py-2 rounded"
+              >
+                Check-in
+              </button>
+            )}
+          </div>
+        );
+      };
+
+      const InventoryItem = ({ item }) => (
+        <div className="flex justify-between p-2 border-b">
+          <span>{item.name} (Tồn: {item.quantity})</span>
+          {isAdmin ? (
+            <input
+              type="number"
+              value={item.price || ""}
+              onChange={(e) => handlePriceUpdate(item._id, e.target.value)}
+              placeholder="Nhập giá"
+              className="border p-1 rounded"
+            />
+          ) : (
+            <span>{item.price ? `${item.price}đ` : "Chưa set giá"}</span>
+          )}
+        </div>
+      );
+
+      return (
+        <div className="container mx-auto p-4">
+          <h1 className="text-3xl font-bold mb-4">Quản Lý Phòng</h1>
+          {!isAdmin ? (
+            <div className="mb-4">
+              <input
+                type="password"
+                value={adminPass}
+                onChange={(e) => setAdminPass(e.target.value)}
+                placeholder="Nhập mật khẩu admin"
+                className="border p-2 rounded"
+              />
+              <button
+                onClick={handleAdminLogin}
+                className="ml-2 bg-blue-500 text-white px-4 py-2 rounded"
+              >
+                Đăng nhập Admin
+              </button>
+            </div>
+          ) : (
+            <div className="mb-4">
+              <h2 className="text-xl font-bold">Cài đặt giá</h2>
+              <input
+                type="number"
+                value={prices.hourly}
+                onChange={(e) => setPrices({ ...prices, hourly: e.target.value })}
+                placeholder="Giá giờ đầu"
+                className="border p-2 rounded mr-2"
+              />
+              <input
+                type="number"
+                value={prices.extraHourly}
+                onChange={(e) => setPrices({ ...prices, extraHourly: e.target.value })}
+                placeholder="Phụ thu giờ"
+                className="border p-2 rounded mr-2"
+              />
+              <input
+                type="number"
+                value={prices.overnight}
+                onChange={(e) => setPrices({ ...prices, overnight: e.target.value })}
+                placeholder="Giá qua đêm"
+                className="border p-2 rounded"
+              />
+            </div>
+          )}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {[2, 3, 4].map((floor) => (
+              <div key={floor}>
+                <h2 className="text-xl font-bold">Tầng {floor}</h2>
+                <div className="grid grid-cols-2 gap-4">
+                  {rooms
+                    .filter((room) => Math.floor(room.roomNumber / 100) === floor)
+                    .map((room) => (
+                      <RoomCard key={room._id} room={room} />
+                    ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-8">
+            <h2 className="text-xl font-bold">Quản Lý Kho</h2>
+            <input type="file" accept=".xlsx, .xls" onChange={handleImportExcel} className="mb-4" />
+            <div>
+              {inventory.map((item) => (
+                <InventoryItem key={item._id} item={item} />
+              ))}
+            </div>
+          </div>
+          <div className="mt-8">
+            <h2 className="text-xl font-bold">Báo Cáo Thu Chi</h2>
+            <p>Ngày: {reports.daily}đ</p>
+            <p>Tuần: {reports.weekly}đ</p>
+            <p>Tháng: {reports.monthly}đ</p>
+          </div>
+          {selectedRoom && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center">
+              <div className="bg-white p-4 rounded-lg">
+                <h2 className="text-xl font-bold">Check-in Phòng {selectedRoom.roomNumber}</h2>
+                <div>
+                  <h3>Chọn sản phẩm:</h3>
+                  {inventory.map((item) => (
+                    <div key={item._id} className="flex items-center">
+                      <input
+                        type="checkbox"
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setExtraItems([...extraItems, { id: item._id, name: item.name, quantity: 1 }]);
+                          } else {
+                            setExtraItems(extraItems.filter((i) => i.id !== item._id));
+                          }
+                        }}
+                      />
+                      <span>{item.name} (Tồn: {item.quantity})</span>
+                      {extraItems.find((i) => i.id === item._id) && (
+                        <input
+                          type="number"
+                          min="1"
+                          value={extraItems.find((i) => i.id === item._id).quantity}
+                          onChange={(e) => {
+                            setExtraItems(
+                              extraItems.map((i) =>
+                                i.id === item._id ? { ...i, quantity: parseInt(e.target.value) } : i
+                              )
+                            );
+                          }}
+                          className="border p-1 rounded ml-2"
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4">
+                  <h3>Phụ thu thêm:</h3>
+                  <input
+                    type="number"
+                    value={additionalFee.amount}
+                    onChange={(e) => setAdditionalFee({ ...additionalFee, amount: e.target.value })}
+                    placeholder="Số tiền"
+                    className="border p-2 rounded mr-2"
+                  />
+                  <input
+                    type="text"
+                    value={additionalFee.note}
+                    onChange={(e) => setAdditionalFee({ ...additionalFee, note: e.target.value })}
+                    placeholder="Ghi chú"
+                    className="border p-2 rounded"
+                  />
+                </div>
+                <button
+                  onClick={() => handleCheckIn(selectedRoom._id)}
+                  className="mt-4 bg-blue-500 text-white px-4 py-2 rounded"
+                >
+                  Xác nhận Check-in
+                </button>
+                <button
+                  onClick={() => setSelectedRoom(null)}
+                  className="mt-2 bg-gray-500 text-white px-4 py-2 rounded"
+                >
+                  Hủy
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    ReactDOM.render(<App />, document.getElementById("root"));
+  </script>
+</body>
+</html>
