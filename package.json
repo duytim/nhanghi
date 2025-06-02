@@ -1,11 +1,11 @@
 {
-  "name": "hotel-management",
+  "name": "nhanghi",
   "version": "1.0.0",
-  "description": "Hotel Management System",
-  "main": "server.js",
+  "description": "Hệ thống quản lý nhà nghỉ",
+  "main": "src/server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js"
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js"
   },
   "dependencies": {
     "express": "^4.19.2",
