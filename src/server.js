@@ -32,6 +32,9 @@ const roomSchema = new mongoose.Schema({
   status: { type: String, enum: ['vacant', 'occupied', 'dirty'], default: 'vacant' },
   checkInTime: Date,
   items: [{ itemId: String, quantity: Number }],
+  type: { type: String, enum: ['hourly', 'overnight'], default: 'hourly' },
+  cccd: String,
+  fullName: String,
 });
 
 const inventorySchema = new mongoose.Schema({
@@ -48,6 +51,9 @@ const transactionSchema = new mongoose.Schema({
   total: Number,
   items: [{ itemId: String, quantity: Number }],
   surcharge: { amount: Number, note: String },
+  type: String,
+  cccd: String,
+  fullName: String,
 });
 
 const priceSchema = new mongoose.Schema({
@@ -113,27 +119,58 @@ app.get('/api/inventory', async (req, res) => {
   }
 });
 
-// API cập nhật giá bán sản phẩm
+// API cập nhật hoặc thêm sản phẩm
 app.post('/api/inventory/price', async (req, res) => {
   try {
-    const { id, salePrice } = req.body;
-    await Inventory.findByIdAndUpdate(id, { salePrice });
+    const { id, name, quantity, purchasePrice, salePrice } = req.body;
+    if (!name || quantity <= 0 || purchasePrice < 0) {
+      throw new Error('Dữ liệu không hợp lệ: Tên, Số lượng và Giá nhập là bắt buộc');
+    }
+    if (id) {
+      // Cập nhật sản phẩm hiện có
+      await Inventory.findByIdAndUpdate(id, { salePrice });
+    } else {
+      // Thêm sản phẩm mới
+      await Inventory.findOneAndUpdate(
+        { name },
+        { $set: { purchasePrice, salePrice }, $inc: { quantity } },
+        { upsert: true }
+      );
+    }
     res.json({ success: true });
   } catch (error) {
-    console.error('Lỗi khi cập nhật giá sản phẩm:', error);
-    res.status(500).json({ error: 'Lỗi khi cập nhật giá sản phẩm' });
+    console.error('Lỗi khi cập nhật/thêm sản phẩm:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
 // API check-in
 app.post('/api/checkin', async (req, res) => {
   try {
-    const { roomId, items, checkInTime } = req.body;
-    await Room.findByIdAndUpdate(roomId, { status: 'occupied', checkInTime, items });
+    const { roomId, items, checkInTime, type, cccd, fullName } = req.body;
+    // Kiểm tra và trừ kho
+    for (const item of items) {
+      const inventoryItem = await Inventory.findById(item.itemId);
+      if (!inventoryItem || inventoryItem.quantity < item.quantity) {
+        throw new Error(`Sản phẩm ${inventoryItem.name} không đủ số lượng trong kho`);
+      }
+      await Inventory.findByIdAndUpdate(item.itemId, {
+        $inc: { quantity: -item.quantity },
+      });
+    }
+    // Cập nhật phòng
+    await Room.findByIdAndUpdate(roomId, {
+      status: 'occupied',
+      checkInTime,
+      items,
+      type,
+      cccd: type === 'overnight' ? cccd : null,
+      fullName: type === 'overnight' ? fullName : null,
+    });
     res.json({ success: true });
   } catch (error) {
     console.error('Lỗi khi check-in:', error);
-    res.status(500).json({ error: 'Lỗi khi check-in' });
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -146,12 +183,8 @@ app.post('/api/checkout', async (req, res) => {
     const checkInTime = new Date(room.checkInTime);
     const checkOutTime = new Date();
     const hours = Math.ceil((checkOutTime - checkInTime) / (1000 * 60 * 15)) / 4; // Làm tròn 15 phút
-    let total = hours <= 1 ? prices.firstHour : prices.firstHour + (hours - 1) * prices.extraHour;
-
-    // Kiểm tra nếu là nghỉ qua đêm
-    if (checkOutTime.getHours() >= 22 || checkInTime.getHours() < 10) {
-      total = prices.overnight;
-    }
+    let total = room.type === 'overnight' ? prices.overnight :
+                hours <= 1 ? prices.firstHour : prices.firstHour + (hours - 1) * prices.extraHour;
 
     // Tính tổng tiền từ các mặt hàng
     const itemsTotal = await Promise.all(
@@ -160,9 +193,6 @@ app.post('/api/checkout', async (req, res) => {
         if (!inventoryItem.salePrice) {
           throw new Error(`Mặt hàng ${inventoryItem.name} chưa có giá bán`);
         }
-        await Inventory.findByIdAndUpdate(item.itemId, {
-          $inc: { quantity: -item.quantity },
-        });
         return inventoryItem.salePrice * item.quantity;
       })
     );
@@ -177,14 +207,44 @@ app.post('/api/checkout', async (req, res) => {
       total,
       items: room.items,
       surcharge,
+      type: room.type,
+      cccd: room.cccd,
+      fullName: room.fullName,
     });
 
     // Cập nhật trạng thái phòng
-    await Room.findByIdAndUpdate(roomId, { status: 'dirty', checkInTime: null, items: [] });
-    res.json({ success: true, total });
+    await Room.findByIdAndUpdate(roomId, {
+      status: 'dirty',
+      checkInTime: null,
+      items: [],
+      type: null,
+      cccd: null,
+      fullName: null,
+    });
+
+    res.json({
+      success: true,
+      total,
+      checkInTime,
+      checkOutTime,
+      hoursUsed: hours,
+      items: room.items,
+    });
   } catch (error) {
     console.error('Lỗi khi check-out:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// API dọn phòng
+app.post('/api/clean-room', async (req, res) => {
+  try {
+    const { roomId } = req.body;
+    await Room.findByIdAndUpdate(roomId, { status: 'vacant' });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Lỗi khi dọn phòng:', error);
+    res.status(500).json({ error: 'Lỗi khi dọn phòng' });
   }
 });
 
@@ -206,16 +266,22 @@ app.post('/api/inventory/import', upload.single('file'), async (req, res) => {
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const data = xlsx.utils.sheet_to_json(sheet);
     for (const item of data) {
+      if (!item['Tên SP'] || !item['Số lượng'] || !item['Giá nhập']) {
+        throw new Error('File Excel thiếu cột Tên SP, Số lượng hoặc Giá nhập');
+      }
+      if (typeof item['Số lượng'] !== 'number' || item['Số lượng'] <= 0) {
+        throw new Error(`Số lượng không hợp lệ cho sản phẩm ${item['Tên SP']}`);
+      }
       await Inventory.findOneAndUpdate(
         { name: item['Tên SP'] },
-        { name: item['Tên SP'], quantity: item['Số lượng'], purchasePrice: item['Giá nhập'] },
+        { $set: { purchasePrice: item['Giá nhập'] }, $inc: { quantity: item['Số lượng'] } },
         { upsert: true }
       );
     }
     res.json({ success: true });
   } catch (error) {
     console.error('Lỗi khi nhập kho:', error);
-    res.status(500).json({ error: 'Lỗi khi nhập kho' });
+    res.status(500).json({ error: error.message });
   }
 });
 
