@@ -123,24 +123,40 @@ app.get('/api/inventory', async (req, res) => {
 app.post('/api/inventory/price', async (req, res) => {
   try {
     const { id, name, quantity, purchasePrice, salePrice } = req.body;
-    if (!name || quantity <= 0 || purchasePrice < 0) {
-      throw new Error('Dữ liệu không hợp lệ: Tên, Số lượng và Giá nhập là bắt buộc');
-    }
+
     if (id) {
-      // Cập nhật sản phẩm hiện có
-      await Inventory.findByIdAndUpdate(id, { salePrice });
+      // Cập nhật giá bán cho sản phẩm hiện có
+      if (salePrice === undefined) {
+        throw new Error('Giá bán là bắt buộc khi cập nhật sản phẩm');
+      }
+      await Inventory.findByIdAndUpdate(id, { salePrice: salePrice || 0 });
     } else {
-      // Thêm sản phẩm mới
+      // Thêm sản phẩm mới hoặc cập nhật sản phẩm hiện có
+      if (!name) {
+        throw new Error('Tên sản phẩm là bắt buộc');
+      }
+      if (quantity === undefined || quantity < 0) {
+        throw new Error('Số lượng phải lớn hơn hoặc bằng 0');
+      }
+      if (purchasePrice === undefined || purchasePrice < 0) {
+        throw new Error('Giá nhập phải lớn hơn hoặc bằng 0');
+      }
       await Inventory.findOneAndUpdate(
         { name },
-        { $set: { purchasePrice, salePrice }, $inc: { quantity } },
+        {
+          $set: {
+            purchasePrice: purchasePrice || 0,
+            salePrice: salePrice || 0,
+          },
+          $inc: { quantity: quantity || 0 },
+        },
         { upsert: true }
       );
     }
     res.json({ success: true });
   } catch (error) {
     console.error('Lỗi khi cập nhật/thêm sản phẩm:', error);
-    res.status(500).json({ error: error.message });
+    res.status(400).json({ error: error.message });
   }
 });
 
@@ -266,11 +282,14 @@ app.post('/api/inventory/import', upload.single('file'), async (req, res) => {
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const data = xlsx.utils.sheet_to_json(sheet);
     for (const item of data) {
-      if (!item['Tên SP'] || !item['Số lượng'] || !item['Giá nhập']) {
+      if (!item['Tên SP'] || item['Số lượng'] === undefined || item['Giá nhập'] === undefined) {
         throw new Error('File Excel thiếu cột Tên SP, Số lượng hoặc Giá nhập');
       }
-      if (typeof item['Số lượng'] !== 'number' || item['Số lượng'] <= 0) {
+      if (typeof item['Số lượng'] !== 'number' || item['Số lượng'] < 0) {
         throw new Error(`Số lượng không hợp lệ cho sản phẩm ${item['Tên SP']}`);
+      }
+      if (typeof item['Giá nhập'] !== 'number' || item['Giá nhập'] < 0) {
+        throw new Error(`Giá nhập không hợp lệ cho sản phẩm ${item['Tên SP']}`);
       }
       await Inventory.findOneAndUpdate(
         { name: item['Tên SP'] },
