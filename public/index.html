@@ -16,12 +16,73 @@
     .card:hover { transform: translateY(-2px); }
     .btn-primary { background-color: #2563eb; }
     .btn-primary:hover { background-color: #1e40af; }
+    .toast { animation: slideIn 0.5s, slideOut 0.5s 2.5s forwards; }
+    @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+    @keyframes slideOut { from { transform: translateX(0); } to { transform: translateX(100%); } }
   </style>
 </head>
 <body>
   <div id="root"></div>
   <script type="text/babel">
     const { useState, useEffect } = React;
+
+    const Toast = ({ message, type, onClose }) => {
+      useEffect(() => {
+        const timer = setTimeout(onClose, 3000);
+        return () => clearTimeout(timer);
+      }, [onClose]);
+      return (
+        <div className={`fixed top-4 right-4 p-4 rounded-lg shadow-lg text-white ${type === 'error' ? 'bg-red-500' : 'bg-green-500'} toast`}>
+          {message}
+        </div>
+      );
+    };
+
+    const InvoicePopup = ({ invoice, onClose }) => {
+      return (
+        <div className="fixed inset-0 modal-overlay flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-xl max-w-lg w-full">
+            <h3 className="text-xl font-semibold mb-4">Hóa Đơn Phòng {invoice.roomNumber}</h3>
+            <table className="w-full text-left border-collapse">
+              <tbody>
+                <tr className="border-b">
+                  <td className="py-2 font-medium">Thời gian vào:</td>
+                  <td className="py-2">{new Date(invoice.checkInTime).toLocaleString('vi-VN')}</td>
+                </tr>
+                <tr className="border-b">
+                  <td className="py-2 font-medium">Thời gian ra:</td>
+                  <td className="py-2">{new Date(invoice.checkOutTime).toLocaleString('vi-VN')}</td>
+                </tr>
+                <tr className="border-b">
+                  <td className="py-2 font-medium">Số giờ sử dụng:</td>
+                  <td className="py-2">{invoice.hoursUsed.toFixed(2)}</td>
+                </tr>
+                <tr className="border-b">
+                  <td className="py-2 font-medium">Sản phẩm:</td>
+                  <td className="py-2">{invoice.items.join(', ') || 'Không có'}</td>
+                </tr>
+                <tr className="border-b">
+                  <td className="py-2 font-medium">Phụ thu:</td>
+                  <td className="py-2">{invoice.surcharge.amount.toLocaleString('vi-VN')} VND ({invoice.surcharge.note || 'Không'})</td>
+                </tr>
+                <tr className="border-b">
+                  <td className="py-2 font-medium">Tổng tiền:</td>
+                  <td className="py-2 font-bold">{invoice.total.toLocaleString('vi-VN')} VND</td>
+                </tr>
+              </tbody>
+            </table>
+            <div className="flex justify-end mt-4">
+              <button
+                onClick={onClose}
+                className="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    };
 
     const App = () => {
       const [rooms, setRooms] = useState([]);
@@ -42,6 +103,8 @@
       const [activeTab, setActiveTab] = useState('prices');
       const [manualInventory, setManualInventory] = useState({ name: '', quantity: 0, purchasePrice: 0, salePrice: 0 });
       const [productPrices, setProductPrices] = useState({});
+      const [toast, setToast] = useState({ message: '', type: '', show: false });
+      const [invoice, setInvoice] = useState(null);
 
       useEffect(() => {
         fetchData();
@@ -50,6 +113,11 @@
         }, 60000); // Update every minute
         return () => clearInterval(interval);
       }, []);
+
+      const showToast = (message, type) => {
+        setToast({ message, type, show: true });
+        setTimeout(() => setToast({ message: '', type: '', show: false }), 3000);
+      };
 
       const fetchData = async () => {
         setLoading(true);
@@ -64,7 +132,7 @@
           setReport(reportRes.data);
         } catch (error) {
           console.error('Lỗi khi lấy dữ liệu:', error);
-          alert('Lỗi khi lấy dữ liệu: ' + error.message);
+          showToast('Lỗi khi lấy dữ liệu: ' + error.message, 'error');
         } finally {
           setLoading(false);
         }
@@ -84,9 +152,9 @@
           fetchData();
           setCheckInData({ items: [], surcharge: { amount: 0, note: '' }, type: 'hourly', cccd: '', fullName: '' });
           setSelectedRoom(null);
-          alert('Check-in thành công');
+          showToast('Check-in thành công', 'success');
         } catch (error) {
-          alert('Lỗi khi check-in: ' + error.response?.data?.error || error.message);
+          showToast('Lỗi khi check-in: ' + (error.response?.data?.error || error.message), 'error');
         } finally {
           setLoading(false);
         }
@@ -97,24 +165,27 @@
         try {
           const response = await axios.post('/api/checkout', { roomId, surcharge: checkInData.surcharge });
           const { total, checkInTime, checkOutTime, hoursUsed, items } = response.data;
+          const room = rooms.find(r => r._id === roomId);
           const itemDetails = await Promise.all(
             items.map(async (item) => {
               const inventoryItem = inventory.find(i => i._id === item.itemId);
               return `${inventoryItem.name} x${item.quantity} (${(inventoryItem.salePrice * item.quantity).toLocaleString('vi-VN')} VND)`;
             })
           );
-          alert(`Hóa đơn:
-- Thời gian vào: ${new Date(checkInTime).toLocaleString('vi-VN')}
-- Thời gian ra: ${new Date(checkOutTime).toLocaleString('vi-VN')}
-- Số giờ sử dụng: ${hoursUsed.toFixed(2)}
-- Sản phẩm: ${itemDetails.join(', ') || 'Không có'}
-- Phụ thu: ${checkInData.surcharge.amount.toLocaleString('vi-VN')} VND (${checkInData.surcharge.note || 'Không'})
-- Tổng: ${total.toLocaleString('vi-VN')} VND`);
+          setInvoice({
+            roomNumber: room.number,
+            checkInTime,
+            checkOutTime,
+            hoursUsed,
+            items: itemDetails,
+            surcharge: checkInData.surcharge,
+            total,
+          });
           fetchData();
           setCheckInData({ items: [], surcharge: { amount: 0, note: '' }, type: 'hourly', cccd: '', fullName: '' });
           setSelectedRoom(null);
         } catch (error) {
-          alert('Lỗi khi check-out: ' + error.response?.data?.error || error.message);
+          showToast('Lỗi khi check-out: ' + (error.response?.data?.error || error.message), 'error');
         } finally {
           setLoading(false);
         }
@@ -127,9 +198,9 @@
             await axios.post('/api/clean-room', { roomId });
             fetchData();
             setSelectedRoom(null);
-            alert('Phòng đã được chuyển sang trạng thái trống');
+            showToast('Phòng đã được chuyển sang trạng thái trống', 'success');
           } catch (error) {
-            alert('Lỗi khi cập nhật trạng thái phòng: ' + error.response?.data?.error || error.message);
+            showToast('Lỗi khi cập nhật trạng thái phòng: ' + (error.response?.data?.error || error.message), 'error');
           } finally {
             setLoading(false);
           }
@@ -140,8 +211,9 @@
         if (pin === '123456') {
           setIsAdmin(true);
           setPin('');
+          showToast('Đăng nhập admin thành công', 'success');
         } else {
-          alert('Mã PIN không đúng');
+          showToast('Mã PIN không đúng', 'error');
         }
       };
 
@@ -149,9 +221,9 @@
         setLoading(true);
         try {
           await axios.post('/api/prices', prices);
-          alert('Cập nhật giá thành công');
+          showToast('Cập nhật giá thành công', 'success');
         } catch (error) {
-          alert('Lỗi khi cập nhật giá: ' + error.response?.data?.error || error.message);
+          showToast('Lỗi khi cập nhật giá: ' + (error.response?.data?.error || error.message), 'error');
         } finally {
           setLoading(false);
         }
@@ -165,9 +237,9 @@
           formData.append('file', file);
           await axios.post('/api/inventory/import', formData);
           fetchData();
-          alert('Nhập kho thành công');
+          showToast('Nhập kho thành công', 'success');
         } catch (error) {
-          alert('Lỗi khi nhập kho: ' + error.response?.data?.error || error.message);
+          showToast('Lỗi khi nhập kho: ' + (error.response?.data?.error || error.message), 'error');
         } finally {
           setLoading(false);
         }
@@ -185,9 +257,9 @@
           });
           fetchData();
           setManualInventory({ name: '', quantity: 0, purchasePrice: 0, salePrice: 0 });
-          alert('Thêm sản phẩm thủ công thành công');
+          showToast('Thêm sản phẩm thủ công thành công', 'success');
         } catch (error) {
-          alert('Lỗi khi thêm sản phẩm: ' + error.response?.data?.error || error.message);
+          showToast('Lỗi khi thêm sản phẩm: ' + (error.response?.data?.error || error.message), 'error');
         } finally {
           setLoading(false);
         }
@@ -203,9 +275,9 @@
           );
           setProductPrices({});
           fetchData();
-          alert('Cập nhật giá sản phẩm thành công');
+          showToast('Cập nhật giá sản phẩm thành công', 'success');
         } catch (error) {
-          alert('Lỗi khi cập nhật giá sản phẩm: ' + error.response?.data?.error || error.message);
+          showToast('Lỗi khi cập nhật giá sản phẩm: ' + (error.response?.data?.error || error.message), 'error');
         } finally {
           setLoading(false);
         }
@@ -229,6 +301,17 @@
 
       return (
         <div className="min-h-screen bg-gray-100">
+          {/* Toast */}
+          {toast.show && <Toast message={toast.message} type={toast.type} onClose={() => setToast({ ...toast, show: false })} />}
+
+          {/* Invoice Popup */}
+          {invoice && (
+            <InvoicePopup
+              invoice={invoice}
+              onClose={() => setInvoice(null)}
+            />
+          )}
+
           {/* Header */}
           <header className="bg-blue-600 text-white p-4 shadow-md">
             <div className="container mx-auto flex justify-between items-center">
