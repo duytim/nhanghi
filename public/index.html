@@ -4,44 +4,59 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Quản Lý Nhà Nghỉ</title>
-  <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/axios@1.6.8/dist/axios.min.js"></script>
+  <!-- Core Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.7.7/dist/axios.min.js" crossorigin="anonymous"></script>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.22.9/babel.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/react-date-picker@10.2.0/dist/DatePicker.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/react-select@5.7.0/dist/react-select.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/react-draggable@4.4.5/build/web/react-draggable.min.js"></script>
-  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.25.2/babel.min.js" crossorigin="anonymous"></script>
+  <!-- Chart.js with fallback -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" crossorigin="anonymous" defer></script>
+  <script>
+    if (!window.Chart) {
+      document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" defer><\/script>');
+    }
+  </script>
+  <!-- Additional Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/react-datepicker@7.3.0/dist/react-datepicker.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-select@5.8.0/dist/react-select.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js" crossorigin="anonymous" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-draggable@4.4.6/build/web/react-draggable.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.socket.io/4.8.0/socket.io.min.js" crossorigin="anonymous"></script>
+  <!-- Styles -->
   <link rel="stylesheet" href="/styles.css">
-  <link href="https://cdn.jsdelivr.net/npm/react-date-picker@10.2.0/dist/DatePicker.css" rel="stylesheet">
-  <link href="https://cdn.jsdelivr.net/npm/react-select@5.7.0/dist/react-select.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/react-datepicker@7.3.0/dist/react-datepicker.min.css" rel="stylesheet" crossorigin="anonymous">
+  <link href="https://cdn.jsdelivr.net/npm/react-select@5.8.0/dist/react-select.min.css" rel="stylesheet" crossorigin="anonymous">
+  <style>
+    .animate-fade-in { animation: fadeIn 0.3s ease-in; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    .modal-content { max-height: 90vh; overflow-y: auto; }
+    @media print { .print-hidden { display: none; } .print-content { background: none; } }
+  </style>
 </head>
 <body>
   <div id="root"></div>
   <script type="text/babel">
     const { useState, useEffect, useCallback, useMemo, lazy, Suspense } = React;
+    const Draggable = window.ReactDraggable.default;
 
     // Lazy-load components
-    const ToastContainer = lazy(() => import('./ToastContainer'));
-    const InvoicePopup = lazy(() => import('./InvoicePopup'));
-
-    const ToastContainer = ({ toasts, removeToast }) => {
-      return (
-        <div className="fixed bottom-4 right-4 space-y-2 z-50">
+    const ToastContainer = lazy(() => Promise.resolve({
+      default: ({ toasts, removeToast }) => (
+        <div className="fixed bottom-4 right-4 space-y-2 z-50" role="region" aria-live="polite">
           {toasts.slice(-3).map(toast => (
             <div
               key={toast.id}
               className={`p-4 rounded-lg shadow-lg text-white flex items-center space-x-2 animate-fade-in
                 ${toast.type === 'error' ? 'bg-red-500' : toast.type === 'warning' ? 'bg-yellow-500' : toast.type === 'info' ? 'bg-blue-500' : 'bg-green-500'}`}
+              role="alert"
             >
               <span>{toast.message}</span>
               {toast.action && (
                 <button
                   onClick={() => toast.action.callback()}
                   className="underline hover:text-gray-200"
+                  aria-label={toast.action.label}
                 >
                   {toast.action.label}
                 </button>
@@ -49,100 +64,103 @@
               <button
                 onClick={() => removeToast(toast.id)}
                 className="text-white hover:text-gray-200"
+                aria-label="Đóng thông báo"
               >
                 ✕
               </button>
             </div>
           ))}
         </div>
-      );
-    };
+      )
+    }));
 
-    const InvoicePopup = ({ invoice, onClose }) => {
-      const { jsPDF } = window.jspdf;
-      const formatHours = (hours) => {
-        const totalMinutes = Math.round(hours * 60);
-        const h = Math.floor(totalMinutes / 60);
-        const m = totalMinutes % 60;
-        return `${h} giờ ${m} phút`;
-      };
+    const InvoicePopup = lazy(() => Promise.resolve({
+      default: ({ invoice, onClose }) => {
+        const { jsPDF } = window.jspdf;
+        const formatHours = (hours) => {
+          const totalMinutes = Math.round(hours * 60);
+          const h = Math.floor(totalMinutes / 60);
+          const m = totalMinutes % 60;
+          return `${h} giờ ${m} phút`;
+        };
 
-      const handlePrint = () => {
-        window.print();
-      };
+        const handlePrint = () => window.print();
+        const handleExportPDF = () => {
+          const doc = new jsPDF();
+          doc.setFontSize(16);
+          doc.text(`Hóa Đơn Phòng ${invoice.roomNumber}`, 10, 10);
+          doc.setFontSize(12);
+          doc.text(`Thời gian vào: ${new Date(invoice.checkInTime).toLocaleString('vi-VN')}`, 10, 20);
+          doc.text(`Thời gian ra: ${new Date(invoice.checkOutTime).toLocaleString('vi-VN')}`, 10, 30);
+          doc.text(`Số giờ sử dụng: ${formatHours(invoice.hoursUsed)}`, 10, 40);
+          doc.text(`Sản phẩm: ${invoice.items.join(', ') || 'Không có'}`, 10, 50);
+          doc.text(`Phụ thu: ${invoice.surcharge.amount.toLocaleString('vi-VN')} VND (${invoice.surcharge.note || 'Không'})`, 10, 60);
+          doc.text(`Tổng tiền: ${invoice.total.toLocaleString('vi-VN')} VND`, 10, 70);
+          doc.save(`hoa_don_phong_${invoice.roomNumber}.pdf`);
+        };
 
-      const handleExportPDF = () => {
-        const doc = new jsPDF();
-        doc.setFontSize(16);
-        doc.text(`Hóa Đơn Phòng ${invoice.roomNumber}`, 10, 10);
-        doc.setFontSize(12);
-        doc.text(`Thời gian vào: ${new Date(invoice.checkInTime).toLocaleString('vi-VN')}`, 10, 20);
-        doc.text(`Thời gian ra: ${new Date(invoice.checkOutTime).toLocaleString('vi-VN')}`, 10, 30);
-        doc.text(`Số giờ sử dụng: ${formatHours(invoice.hoursUsed)}`, 10, 40);
-        doc.text(`Sản phẩm: ${invoice.items.join(', ') || 'Không có'}`, 10, 50);
-        doc.text(`Phụ thu: ${invoice.surcharge.amount.toLocaleString('vi-VN')} VND (${invoice.surcharge.note || 'Không'})`, 10, 60);
-        doc.text(`Tổng tiền: ${invoice.total.toLocaleString('vi-VN')} VND`, 10, 70);
-        doc.save(`hoa_don_phong_${invoice.roomNumber}.pdf`);
-      };
-
-      return (
-        <Draggable>
-          <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 animate-fade-in">
-            <div className="bg-white p-6 rounded-lg shadow-xl max-w-lg w-full print:bg-white print:shadow-none">
-              <h3 className="text-xl font-semibold mb-4 print:text-center">Hóa Đơn Phòng {invoice.roomNumber}</h3>
-              <table className="w-full text-left border-collapse print:border print:border-gray-300">
-                <tbody>
-                  <tr className="border-b print:border-gray-300">
-                    <td className="py-2 font-medium">Thời gian vào:</td>
-                    <td className="py-2">{new Date(invoice.checkInTime).toLocaleString('vi-VN')}</td>
-                  </tr>
-                  <tr className="border-b print:border-gray-300">
-                    <td className="py-2 font-medium">Thời gian ra:</td>
-                    <td className="py-2">{new Date(invoice.checkOutTime).toLocaleString('vi-VN')}</td>
-                  </tr>
-                  <tr className="border-b print:border-gray-300">
-                    <td className="py-2 font-medium">Số giờ sử dụng:</td>
-                    <td className="py-2">{formatHours(invoice.hoursUsed)}</td>
-                  </tr>
-                  <tr className="border-b print:border-gray-300">
-                    <td className="py-2 font-medium">Sản phẩm:</td>
-                    <td className="py-2">{invoice.items.join(', ') || 'Không có'}</td>
-                  </tr>
-                  <tr className="border-b print:border-gray-300">
-                    <td className="py-2 font-medium">Phụ thu:</td>
-                    <td className="py-2">{invoice.surcharge.amount.toLocaleString('vi-VN')} VND ({invoice.surcharge.note || 'Không'})</td>
-                  </tr>
-                  <tr className="border-b print:border-gray-300">
-                    <td className="py-2 font-medium">Tổng tiền:</td>
-                    <td className="py-2 font-bold">{invoice.total.toLocaleString('vi-VN')} VND</td>
-                  </tr>
-                </tbody>
-              </table>
-              <div className="flex justify-end mt-4 space-x-2 print:hidden">
-                <button
-                  onClick={handlePrint}
-                  className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
-                >
-                  In
-                </button>
-                <button
-                  onClick={handleExportPDF}
-                  className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600"
-                >
-                  Xuất PDF
-                </button>
-                <button
-                  onClick={onClose}
-                  className="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600"
-                >
-                  Đóng
-                </button>
+        return (
+          <Draggable>
+            <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 animate-fade-in print-content" role="dialog" aria-modal="true">
+              <div className="bg-white p-6 rounded-lg shadow-xl max-w-lg w-full modal-content print:bg-white print:shadow-none">
+                <h3 className="text-xl font-semibold mb-4 print:text-center" id="invoice-title">Hóa Đơn Phòng {invoice.roomNumber}</h3>
+                <table className="w-full text-left border-collapse print:border print:border-gray-300">
+                  <tbody>
+                    <tr className="border-b print:border-gray-300">
+                      <td className="py-2 font-medium">Thời gian vào:</td>
+                      <td className="py-2">{new Date(invoice.checkInTime).toLocaleString('vi-VN')}</td>
+                    </tr>
+                    <tr className="border-b print:border-gray-300">
+                      <td className="py-2 font-medium">Thời gian ra:</td>
+                      <td className="py-2">{new Date(invoice.checkOutTime).toLocaleString('vi-VN')}</td>
+                    </tr>
+                    <tr className="border-b print:border-gray-300">
+                      <td className="py-2 font-medium">Số giờ sử dụng:</td>
+                      <td className="py-2">{formatHours(invoice.hoursUsed)}</td>
+                    </tr>
+                    <tr className="border-b print:border-gray-300">
+                      <td className="py-2 font-medium">Sản phẩm:</td>
+                      <td className="py-2">{invoice.items.join(', ') || 'Không có'}</td>
+                    </tr>
+                    <tr className="border-b print:border-gray-300">
+                      <td className="py-2 font-medium">Phụ thu:</td>
+                      <td className="py-2">{invoice.surcharge.amount.toLocaleString('vi-VN')} VND ({invoice.surcharge.note || 'Không'})</td>
+                    </tr>
+                    <tr className="border-b print:border-gray-300">
+                      <td className="py-2 font-medium">Tổng tiền:</td>
+                      <td className="py-2 font-bold">{invoice.total.toLocaleString('vi-VN')} VND</td>
+                    </tr>
+                  </tbody>
+                </table>
+                <div className="flex justify-end mt-4 space-x-2 print-hidden">
+                  <button
+                    onClick={handlePrint}
+                    className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                    aria-label="In hóa đơn"
+                  >
+                    In
+                  </button>
+                  <button
+                    onClick={handleExportPDF}
+                    className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600"
+                    aria-label="Xuất PDF"
+                  >
+                    Xuất PDF
+                  </button>
+                  <button
+                    onClick={onClose}
+                    className="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600"
+                    aria-label="Đóng hóa đơn"
+                  >
+                    Đóng
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        </Draggable>
-      );
-    };
+          </Draggable>
+        );
+      }
+    }));
 
     const App = React.memo(() => {
       const [rooms, setRooms] = useState([]);
@@ -171,30 +189,35 @@
       const [bulkInventory, setBulkInventory] = useState([{ name: '', quantity: 0, purchasePrice: 0, salePrice: 0 }]);
       const socket = useMemo(() => io(), []);
 
+      // Fetch initial data and set up WebSocket
       useEffect(() => {
         fetchData();
-        const interval = setInterval(() => setRooms(prev => [...prev]), 60000);
-        socket.on('roomUpdate', (updatedRooms) => setRooms(updatedRooms));
-        socket.on('inventoryUpdate', (updatedInventory) => setInventory(updatedInventory));
+        const interval = setInterval(() => setRooms(prev => [...prev]), 60000); // Refresh UI every minute
+        socket.on('roomUpdate', setRooms);
+        socket.on('inventoryUpdate', setInventory);
         return () => {
           clearInterval(interval);
           socket.disconnect();
         };
-      }, []);
+      }, [socket]);
 
+      // Persist active tab
       useEffect(() => {
         localStorage.setItem('activeTab', activeTab);
       }, [activeTab]);
 
+      // Toast management
       const addToast = useCallback((message, type, action = null) => {
         const id = Date.now();
         setToasts(prev => [...prev, { id, message, type, action }]);
+        setTimeout(() => removeToast(id), 5000);
       }, []);
 
       const removeToast = useCallback((id) => {
         setToasts(prev => prev.filter(toast => toast.id !== id));
       }, []);
 
+      // Fetch data
       const fetchData = useCallback(async () => {
         setLoading(true);
         try {
@@ -209,12 +232,13 @@
           setReport(reportRes.data);
           setTransactions(transactionsRes.data);
         } catch (error) {
-          addToast('Lỗi khi lấy dữ liệu: ' + error.message, 'error');
+          addToast(`Lỗi khi lấy dữ liệu: ${error.message}`, 'error');
         } finally {
           setLoading(false);
         }
-      }, []);
+      }, [addToast]);
 
+      // Check-in handler
       const handleCheckIn = useCallback(async (roomId) => {
         setLoading(true);
         try {
@@ -226,17 +250,18 @@
             cccd: checkInData.cccd,
             fullName: checkInData.fullName,
           });
-          fetchData();
+          await fetchData();
           setCheckInData({ items: [], surcharge: { amount: 0, note: '' }, type: 'hourly', cccd: '', fullName: '' });
           setSelectedRoom(null);
           addToast('Check-in thành công', 'success');
         } catch (error) {
-          addToast('Lỗi khi check-in: ' + (error.response?.data?.error || error.message), 'error');
+          addToast(`Lỗi khi check-in: ${error.response?.data?.error || error.message}`, 'error');
         } finally {
           setLoading(false);
         }
-      }, [checkInData, fetchData]);
+      }, [checkInData, fetchData, addToast]);
 
+      // Check-out handler
       const handleCheckOut = useCallback(async (roomId) => {
         setLoading(true);
         try {
@@ -258,40 +283,42 @@
             surcharge: checkInData.surcharge,
             total,
           });
-          fetchData();
+          await fetchData();
           setCheckInData({ items: [], surcharge: { amount: 0, note: '' }, type: 'hourly', cccd: '', fullName: '' });
           setSelectedRoom(null);
           addToast('Check-out thành công', 'success', {
             label: 'Hoàn tác',
             callback: async () => {
               await axios.post('/api/undo-checkout', { roomId });
-              fetchData();
+              await fetchData();
               addToast('Hoàn tác check-out thành công', 'success');
             },
           });
         } catch (error) {
-          addToast('Lỗi khi check-out: ' + (error.response?.data?.error || error.message), 'error');
+          addToast(`Lỗi khi check-out: ${error.response?.data?.error || error.message}`, 'error');
         } finally {
           setLoading(false);
         }
-      }, [checkInData, rooms, inventory, fetchData]);
+      }, [checkInData, rooms, inventory, fetchData, addToast]);
 
+      // Clean room handler
       const handleCleanRoom = useCallback(async (roomId) => {
         if (window.confirm('Xác nhận phòng đã được dọn sạch?')) {
           setLoading(true);
           try {
             await axios.post('/api/clean-room', { roomId });
-            fetchData();
+            await fetchData();
             setSelectedRoom(null);
             addToast('Phòng đã được dọn sạch', 'success');
           } catch (error) {
-            addToast('Lỗi khi dọn phòng: ' + (error.response?.data?.error || error.message), 'error');
+            addToast(`Lỗi khi dọn phòng: ${error.response?.data?.error || error.message}`, 'error');
           } finally {
             setLoading(false);
           }
         }
-      }, [fetchData]);
+      }, [fetchData, addToast]);
 
+      // Admin login
       const handleAdminLogin = useCallback(() => {
         if (pin === '123456') {
           setIsAdmin(true);
@@ -300,20 +327,22 @@
         } else {
           addToast('Mã PIN không đúng', 'error');
         }
-      }, [pin]);
+      }, [pin, addToast]);
 
+      // Update prices
       const handlePriceUpdate = useCallback(async () => {
         setLoading(true);
         try {
           await axios.post('/api/prices', prices);
           addToast('Cập nhật giá thành công', 'success');
         } catch (error) {
-          addToast('Lỗi khi cập nhật giá: ' + (error.response?.data?.error || error.message), 'error');
+          addToast(`Lỗi khi cập nhật giá: ${error.response?.data?.error || error.message}`, 'error');
         } finally {
           setLoading(false);
         }
-      }, [prices]);
+      }, [prices, addToast]);
 
+      // Excel import
       const handleExcelImport = useCallback(async (event) => {
         setLoading(true);
         try {
@@ -321,16 +350,19 @@
           if (!file) throw new Error('Vui lòng chọn file Excel');
           const formData = new FormData();
           formData.append('file', file);
-          await axios.post('/api/inventory/import', formData);
-          fetchData();
+          await axios.post('/api/inventory/import', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }
+          });
+          await fetchData();
           addToast('Nhập kho thành công', 'success');
         } catch (error) {
-          addToast('Lỗi khi nhập kho: ' + (error.response?.data?.error || error.message), 'error');
+          addToast(`Lỗi khi nhập kho: ${error.response?.data?.error || error.message}`, 'error');
         } finally {
           setLoading(false);
         }
-      }, [fetchData]);
+      }, [fetchData, addToast]);
 
+      // Manual inventory
       const handleManualInventory = useCallback(async () => {
         if (!manualInventory.name || manualInventory.quantity < 0 || manualInventory.purchasePrice < 0) {
           addToast('Tên, số lượng và giá nhập là bắt buộc, không được âm', 'warning');
@@ -338,23 +370,23 @@
         }
         setLoading(true);
         try {
-          await axios.post('/api/inventory', {
-            id: manualInventory.id || null,
+          await axios.post('/api/inventory/price', {
             name: manualInventory.name,
             quantity: manualInventory.quantity,
             purchasePrice: manualInventory.purchasePrice,
             salePrice: manualInventory.salePrice || 0,
           });
-          fetchData();
-          setManualInventory({ name: '', quantity: '', purchasePrice: 0, salePrice: 0 });
+          await fetchData();
+          setManualInventory({ name: '', quantity: 0, purchasePrice: 0, salePrice: 0 });
           addToast('Thêm sản phẩm thành công', 'success');
         } catch (error) {
-          addToast('Lỗi khi thêm sản phẩm: ' + (error.response?.data?.error || error.message), 'error');
+          addToast(`Lỗi khi thêm sản phẩm: ${error.response?.data?.error || error.message}`, 'error');
         } finally {
           setLoading(false);
         }
-      }, [manualInventory, fetchData]);
+      }, [manualInventory, fetchData, addToast]);
 
+      // Bulk inventory
       const handleBulkInventory = useCallback(async () => {
         const validItems = bulkInventory.filter(item => item.name && item.quantity >= 0 && item.purchasePrice >= 0);
         if (!validItems.length) {
@@ -364,34 +396,36 @@
         setLoading(true);
         try {
           await axios.post('/api/inventory/bulk', validItems);
-          fetchData();
-          setBulkInventory([{ name: '', quantity: 1, purchasePrice: 0, salePrice: 0 }]);
+          await fetchData();
+          setBulkInventory([{ name: '', quantity: 0, purchasePrice: 0, salePrice: 0 }]);
           addToast('Nhập kho hàng loạt thành công', 'success');
         } catch (error) {
-          addToast('Lỗi khi nhập kho: ' + (error.response?.data?.error || error.message), 'error');
+          addToast(`Lỗi khi nhập kho: ${error.response?.data?.error || error.message}`, 'error');
         } finally {
           setLoading(false);
         }
-      }, [bulkInventory, fetchData]);
+      }, [bulkInventory, fetchData, addToast]);
 
+      // Update product prices
       const handleProductPriceUpdate = useCallback(async () => {
         setLoading(true);
         try {
           await Promise.all(
             Object.entries(productPrices).map(([id, salePrice]) =>
               axios.post('/api/inventory/price', { id, salePrice: parseInt(salePrice) || 0 })
-            );
+            )
           );
           setProductPrices({});
-          fetchData();
+          await fetchData();
           addToast('Cập nhật giá sản phẩm thành công', 'success');
         } catch (error) {
-          addToast('Lỗi khi cập nhật giá sản phẩm: ' + (error.response?.data?.error || error.message), 'error');
+          addToast(`Lỗi khi cập nhật giá sản phẩm: ${error.response?.data?.error || error.message}`, 'error');
         } finally {
           setLoading(false);
         }
-      }, [productPrices, fetchData]);
+      }, [productPrices, fetchData, addToast]);
 
+      // Room styling
       const getRoomColor = useCallback((status) => ({
         vacant: 'bg-green-100 text-green-800',
         occupied: 'bg-blue-100 text-blue-800',
@@ -412,6 +446,7 @@
         return `${hours} giờ ${minutes} phút`;
       }, []);
 
+      // Filtered transactions
       const filteredTransactions = useMemo(() => {
         return transactions.filter((t) => {
           const roomMatch = !filter.room || t.roomId === filter.room?.value;
@@ -422,6 +457,7 @@
         });
       }, [transactions, filter, dateRange]);
 
+      // Analytics
       const analytics = useMemo(() => {
         const roomUsage = {};
         const itemSales = {};
@@ -447,19 +483,36 @@
         };
       }, [transactions]);
 
+      // Chart data
       const chartData = useMemo(() => ({
         labels: ['Ngày', 'Tuần', 'Tháng'],
         datasets: [{
-          label: [report.daily, report.weekly, report.monthly],
+          label: 'Doanh thu (VND)',
           data: [report.daily, report.weekly, report.monthly],
           backgroundColor: ['#2563eb', '#4a90e2', '#90cdf4'],
         }],
-      ],
-      [report]);
+      }), [report]);
+
+      // Render chart
+      useEffect(() => {
+        const ctx = document.getElementById('revenueChart')?.getContext('2d');
+        if (ctx && window.Chart) {
+          const chart = new Chart(ctx, {
+            type: 'bar',
+            data: chartData,
+            options: {
+              responsive: true,
+              scales: { y: { beginAtZero: true, title: { display: true, text: 'Doanh thu (VND)' } } },
+              plugins: { legend: { display: false } },
+            },
+          });
+          return () => chart.destroy();
+        }
+      }, [chartData]);
 
       return (
         <Suspense fallback={<div className="text-center p-4">Đang tải...</div>}>
-          <div className="min-h-screen bg-white">
+          <div className="min-h-screen bg-gray-50">
             <ToastContainer toasts={toasts} removeToast={removeToast} />
             {invoice && <InvoicePopup invoice={invoice} onClose={() => setInvoice(null)} />}
 
@@ -468,17 +521,19 @@
               <div className="container mx-auto flex flex-col sm:flex-row justify-between items-center">
                 <h1 className="text-2xl md:text-3xl font-bold mb-2 sm:mb-0">Quản Lý Nhà Nghỉ</h1>
                 {!isAdmin ? (
-                  <div className="flex items-center space-x-2">
+                  <div className="flex items-center space-x-2 w-full sm:w-auto">
                     <input
                       type="password"
-                      placeholder="Nhập mã PIN Admin"
+                      placeholder="Mã PIN Admin"
                       value={pin}
                       onChange={(e) => setPin(e.target.value)}
-                      className="border p-2 rounded text-gray-800 w-full sm:w-auto"
+                      className="border p-2 rounded text-gray-800 flex-grow sm:flex-grow-0"
+                      aria-label="Mã PIN Admin"
                     />
                     <button
                       onClick={handleAdminLogin}
                       className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                      disabled={loading}
                     >
                       Đăng nhập
                     </button>
@@ -487,6 +542,7 @@
                   <button
                     onClick={() => setIsAdmin(false)}
                     className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
+                    aria-label="Đăng xuất admin"
                   >
                     Đăng xuất
                   </button>
@@ -497,8 +553,8 @@
             {/* Main Content */}
             <main className="container mx-auto p-4 md:p-6">
               {loading && (
-                <div className="text-center text-blue-600 mb-4">
-                  <svg className="animate-spin h-5 w-5 inline mr-2" viewBox="0 0 24 24">
+                <div className="text-center text-blue-600 mb-4 flex items-center justify-center">
+                  <svg className="animate-spin h-5 w-5 mr-2" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
                   </svg>
@@ -506,13 +562,14 @@
                 </div>
               )}
 
-              {/* Danh sách phòng */}
+              {/* Room List */}
               <section className="mb-8 bg-white p-6 rounded-lg shadow-md">
                 <div className="flex flex-col sm:flex-row justify-between items-center mb-4">
                   <h2 className="text-xl md:text-2xl font-semibold mb-2 sm:mb-0">Trạng Thái Phòng</h2>
                   <button
                     onClick={fetchData}
                     className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                    aria-label="Làm mới dữ liệu"
                   >
                     Làm mới
                   </button>
@@ -526,10 +583,12 @@
                           key={room._id}
                           className={`relative p-4 rounded-lg ${getRoomColor(room.status)} text-center cursor-pointer shadow-md hover:shadow-lg transition-shadow group`}
                           onClick={() => setSelectedRoom(room)}
+                          role="button"
+                          aria-label={`Phòng ${room.number}, trạng thái: ${room.status}`}
                         >
                           <div className="flex items-center justify-center space-x-2">
                             <span>{getRoomIcon(room.status)}</span>
-                            <div>Phòng {room.number}</div>
+                            <span>Phòng {room.number}</span>
                           </div>
                           {room.status === 'occupied' && (
                             <div className="text-sm mt-2">
@@ -552,12 +611,12 @@
                 ))}
               </section>
 
-              {/* Modal Check-in/Check-out */}
+              {/* Check-in/Check-out Modal */}
               {selectedRoom && (
-                <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
-                  <div className="bg-white p-6 rounded-lg shadow-xl max-w-md w-full">
-                    <h3 className="text-xl font-semibold mb-4">
-                      {selectedRoom.status === 'dirty' ? `Xác Nhận Dọn Phòng ${selectedRoom.number}` : `Quản Lý Phòng ${selectedRoom.number}`}
+                <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 animate-fade-in" role="dialog" aria-modal="true">
+                  <div className="bg-white p-6 rounded-lg shadow-xl max-w-md w-full modal-content">
+                    <h3 className="text-xl font-semibold mb-4" id="room-modal-title">
+                      {selectedRoom.status === 'dirty' ? `Xác nhận dọn Phòng ${selectedRoom.number}` : `Quản lý Phòng ${selectedRoom.number}`}
                     </h3>
                     {selectedRoom.status === 'dirty' ? (
                       <div>
@@ -567,12 +626,14 @@
                             onClick={() => handleCleanRoom(selectedRoom._id)}
                             className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
                             disabled={loading}
+                            aria-label="Xác nhận dọn phòng"
                           >
                             Xác nhận
                           </button>
                           <button
                             onClick={() => setSelectedRoom(null)}
                             className="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600"
+                            aria-label="Đóng modal"
                           >
                             Đóng
                           </button>
@@ -583,11 +644,13 @@
                         {selectedRoom.status === 'vacant' && (
                           <>
                             <div className="mb-4">
-                              <label className="block text-sm font-medium mb-1">Loại nghỉ:</label>
+                              <label className="block text-sm font-medium mb-1" htmlFor="room-type">Loại nghỉ:</label>
                               <select
+                                id="room-type"
                                 value={checkInData.type}
                                 onChange={(e) => setCheckInData({ ...checkInData, type: e.target.value })}
                                 className="border p-2 w-full rounded"
+                                aria-label="Loại nghỉ"
                               >
                                 <option value="hourly">Nghỉ giờ</option>
                                 <option value="overnight">Qua đêm</option>
@@ -596,23 +659,27 @@
                             {checkInData.type === 'overnight' && (
                               <>
                                 <div className="mb-4">
-                                  <label className="block text-sm font-medium mb-1">CCCD:</label>
+                                  <label className="block text-sm font-medium mb-1" htmlFor="cccd">CCCD:</label>
                                   <input
+                                    id="cccd"
                                     type="text"
                                     placeholder="Số CCCD"
                                     value={checkInData.cccd}
                                     onChange={(e) => setCheckInData({ ...checkInData, cccd: e.target.value })}
                                     className="border p-2 w-full rounded"
+                                    aria-label="Số CCCD"
                                   />
                                 </div>
                                 <div className="mb-4">
-                                  <label className="block text-sm font-medium mb-1">Họ Tên:</label>
+                                  <label className="block text-sm font-medium mb-1" htmlFor="fullName">Họ Tên:</label>
                                   <input
+                                    id="fullName"
                                     type="text"
                                     placeholder="Họ và Tên"
                                     value={checkInData.fullName}
                                     onChange={(e) => setCheckInData({ ...checkInData, fullName: e.target.value })}
                                     className="border p-2 w-full rounded"
+                                    aria-label="Họ và Tên"
                                   />
                                 </div>
                               </>
@@ -633,6 +700,7 @@
                                       setCheckInData({ ...checkInData, items });
                                     }}
                                     className="border p-2 w-20 mr-2 rounded"
+                                    aria-label={`Số lượng ${item.name}`}
                                   />
                                   <span>{item.name} (Tồn: {item.quantity})</span>
                                 </div>
@@ -643,21 +711,24 @@
                         {selectedRoom.status === 'occupied' && (
                           <>
                             <div className="mb-4">
-                              <label className="block text-sm font-medium mb-1">Phụ thu (VND):</label>
+                              <label className="block text-sm font-medium mb-1" htmlFor="surcharge-amount">Phụ thu (VND):</label>
                               <input
+                                id="surcharge-amount"
                                 type="number"
-                                placeholder="Số tiền phụ thu"
+                                placeholder="0"
                                 value={checkInData.surcharge.amount}
                                 onChange={(e) => setCheckInData({
                                   ...checkInData,
                                   surcharge: { ...checkInData.surcharge, amount: parseInt(e.target.value) || 0 }
                                 })}
                                 className="border p-2 w-full rounded"
+                                aria-label="Phụ thu"
                               />
                             </div>
                             <div className="mb-4">
-                              <label className="block text-sm font-medium mb-1">Ghi chú phụ thu:</label>
+                              <label className="block text-sm font-medium mb-1" htmlFor="surcharge-note">Ghi chú phụ thu:</label>
                               <input
+                                id="surcharge-note"
                                 type="text"
                                 placeholder="Ghi chú"
                                 value={checkInData.surcharge.note}
@@ -666,6 +737,7 @@
                                   surcharge: { ...checkInData.surcharge, note: e.target.value }
                                 })}
                                 className="border p-2 w-full rounded"
+                                aria-label="Ghi chú phụ thu"
                               />
                             </div>
                           </>
@@ -676,6 +748,7 @@
                               onClick={() => handleCheckIn(selectedRoom._id)}
                               className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
                               disabled={loading || (checkInData.type === 'overnight' && (!checkInData.cccd || !checkInData.fullName))}
+                              aria-label="Check-in phòng"
                             >
                               Check-In
                             </button>
@@ -685,6 +758,7 @@
                               onClick={() => handleCheckOut(selectedRoom._id)}
                               className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
                               disabled={loading}
+                              aria-label="Check-out phòng"
                             >
                               Check-Out
                             </button>
@@ -692,6 +766,7 @@
                           <button
                             onClick={() => setSelectedRoom(null)}
                             className="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600"
+                            aria-label="Đóng modal"
                           >
                             Đóng
                           </button>
@@ -710,8 +785,9 @@
                     {['prices', 'inventory', 'productPrices', 'transactions', 'analytics'].map(tab => (
                       <button
                         key={tab}
-                        className={`px-4 py-2 ${activeTab === tab ? 'border-b-2 border-blue-600' : ''}`}
+                        className={`px-4 py-2 ${activeTab === tab ? 'border-b-2 border-blue-600 font-medium' : 'text-gray-600 hover:text-gray-800'}`}
                         onClick={() => setActiveTab(tab)}
+                        aria-label={`Chuyển sang tab ${tab}`}
                       >
                         {tab === 'prices' ? 'Cài Đặt Giá' :
                          tab === 'inventory' ? 'Nhập Kho' :
@@ -726,36 +802,43 @@
                       <h3 className="text-lg font-medium mb-2">Cài Đặt Giá</h3>
                       <div className="space-y-4">
                         <div>
-                          <label className="block text-sm font-medium">Giá giờ đầu (VND):</label>
+                          <label className="block text-sm font-medium" htmlFor="first-hour">Giá giờ đầu (VND):</label>
                           <input
+                            id="first-hour"
                             type="number"
                             value={prices.firstHour}
                             onChange={(e) => setPrices({ ...prices, firstHour: parseInt(e.target.value) || 0 })}
                             className="border p-2 w-full rounded"
+                            aria-label="Giá giờ đầu"
                           />
                         </div>
                         <div>
-                          <label className="block text-sm font-medium">Giá giờ tiếp theo (VND):</label>
+                          <label className="block text-sm font-medium" htmlFor="extra-hour">Giá giờ tiếp theo (VND):</label>
                           <input
+                            id="extra-hour"
                             type="number"
                             value={prices.extraHour}
                             onChange={(e) => setPrices({ ...prices, extraHour: parseInt(e.target.value) || 0 })}
                             className="border p-2 w-full rounded"
+                            aria-label="Giá giờ tiếp theo"
                           />
                         </div>
                         <div>
-                          <label className="block text-sm font-medium">Giá qua đêm (VND):</label>
+                          <label className="block text-sm font-medium" htmlFor="overnight">Giá qua đêm (VND):</label>
                           <input
+                            id="overnight"
                             type="number"
                             value={prices.overnight}
                             onChange={(e) => setPrices({ ...prices, overnight: parseInt(e.target.value) || 0 })}
                             className="border p-2 w-full rounded"
+                            aria-label="Giá qua đêm"
                           />
                         </div>
                         <button
                           onClick={handlePriceUpdate}
                           className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
                           disabled={loading}
+                          aria-label="Cập nhật giá"
                         >
                           Cập nhật giá
                         </button>
@@ -767,12 +850,14 @@
                     <div>
                       <h3 className="text-lg font-medium mb-2">Nhập Kho</h3>
                       <div className="mb-4">
-                        <label className="block text-sm font-medium mb-1">Nhập bằng Excel:</label>
+                        <label className="block text-sm font-medium mb-1" htmlFor="excel-import">Nhập bằng Excel:</label>
                         <input
+                          id="excel-import"
                           type="file"
                           accept=".xlsx"
                           onChange={handleExcelImport}
                           className="border p-2 w-full rounded"
+                          aria-label="Nhập kho bằng Excel"
                         />
                         <p className="text-sm text-gray-500 mt-1">
                           File Excel cần cột: Tên SP, Số lượng, Giá nhập.
@@ -782,51 +867,60 @@
                         <h4 className="text-md font-medium mb-2">Nhập thủ công:</h4>
                         <div className="space-y-4">
                           <div>
-                            <label className="block text-sm font-medium">Tên sản phẩm:</label>
+                            <label className="block text-sm font-medium" htmlFor="manual-name">Tên sản phẩm:</label>
                             <input
+                              id="manual-name"
                               type="text"
                               value={manualInventory.name}
                               onChange={(e) => setManualInventory({ ...manualInventory, name: e.target.value })}
                               className="border p-2 w-full rounded"
                               required
+                              aria-label="Tên sản phẩm thủ công"
                             />
                           </div>
                           <div>
-                            <label className="block text-sm font-medium">Số lượng:</label>
+                            <label className="block text-sm font-medium" htmlFor="manual-quantity">Số lượng:</label>
                             <input
+                              id="manual-quantity"
                               type="number"
                               value={manualInventory.quantity}
                               onChange={(e) => setManualInventory({ ...manualInventory, quantity: parseInt(e.target.value) || 0 })}
                               className="border p-2 w-full rounded"
                               min="0"
                               required
+                              aria-label="Số lượng thủ công"
                             />
                           </div>
                           <div>
-                            <label className="block text-sm font-medium">Giá nhập (VND):</label>
+                            <label className="block text-sm font-medium" htmlFor="manual-purchasePrice">Giá nhập (VND):</label>
                             <input
+                              id="manual-purchasePrice"
                               type="number"
                               value={manualInventory.purchasePrice}
                               onChange={(e) => setManualInventory({ ...manualInventory, purchasePrice: parseInt(e.target.value) || 0 })}
                               className="border p-2 w-full rounded"
                               min="0"
                               required
+                              aria-label="Giá nhập thủ công"
                             />
                           </div>
                           <div>
-                            <label className="block text-sm font-medium">Giá bán (VND, tùy chọn):</label>
+                            <label className="block text-sm font-medium" htmlFor="manual-salePrice">Giá bán (VND, tùy chọn):</label>
                             <input
+                              id="manual-salePrice"
                               type="number"
                               value={manualInventory.salePrice}
                               onChange={(e) => setManualInventory({ ...manualInventory, salePrice: parseInt(e.target.value) || 0 })}
                               className="border p-2 w-full rounded"
                               min="0"
+                              aria-label="Giá bán thủ công"
                             />
                           </div>
                           <button
                             onClick={handleManualInventory}
                             className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
                             disabled={loading}
+                            aria-label="Thêm sản phẩm thủ công"
                           >
                             Thêm sản phẩm
                           </button>
@@ -846,6 +940,7 @@
                                 setBulkInventory(newItems);
                               }}
                               className="border p-2 rounded"
+                              aria-label={`Tên sản phẩm hàng loạt ${index + 1}`}
                             />
                             <input
                               type="number"
@@ -858,6 +953,7 @@
                               }}
                               className="border p-2 rounded"
                               min="0"
+                              aria-label={`Số lượng hàng loạt ${index + 1}`}
                             />
                             <input
                               type="number"
@@ -870,6 +966,7 @@
                               }}
                               className="border p-2 rounded"
                               min="0"
+                              aria-label={`Giá nhập hàng loạt ${index + 1}`}
                             />
                             <input
                               type="number"
@@ -882,20 +979,23 @@
                               }}
                               className="border p-2 rounded"
                               min="0"
+                              aria-label={`Giá bán hàng loạt ${index + 1}`}
                             />
                           </div>
                         ))}
-                        <div className="flex space-x-2">
+                        <div className="flex space-x-2 mt-2">
                           <button
-                            onClick={() => setBulkInventory([...bulkInventory, { name: '', quantity: 1, purchasePrice: 0, salePrice: 0 }])}
-                            className="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600"
+                            onClick={() => setBulkInventory([...bulkInventory, { name: '', quantity: 0, purchasePrice: 0, salePrice: 0 }])}
+                            className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600"
+                            aria-label="Thêm sản phẩm hàng loạt"
                           >
-                            Thêm dòng
+                            Thêm
                           </button>
                           <button
                             onClick={handleBulkInventory}
                             className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
                             disabled={loading}
+                            aria-label="Nhập kho hàng loạt"
                           >
                             Nhập kho
                           </button>
@@ -906,206 +1006,142 @@
 
                   {activeTab === 'productPrices' && (
                     <div>
-                      <h3 className="text-lg font-medium mb-2">Cài Đặt Giá Sản Phẩm</h3>
-                      <div className="space-y-2">
+                      <h3 className="text-lg font-medium mb-2">Cập Nhật Giá Sản Phẩm</h3>
+                      <div className="space-y-4">
                         {inventory.map(item => (
-                          <div key={item._id} className="flex items-center p-2 bg-gray-50 rounded">
-                            <span className="flex-1">{item.name} (Tồn: {item.quantity})</span>
-                            {item.quantity < 10 && (
-                              <span className="text-yellow-500 mr-2">⚠ Sắp hết hàng</span>
-                            )}
+                          <div key={item._id} className="flex items-center space-x-2">
+                            <span className="flex-grow">{item.name}</span>
                             <input
                               type="number"
-                              placeholder="Giá bán (VND)"
-                              value={productPrices[item._id] ?? item.salePrice ?? ''}
-                              onChange={(e) => setProductPrices({
-                                ...productPrices,
-                                [item._id]: e.target.value
-                              })}
+                              placeholder="Giá bán"
+                              value={productPrices[item._id] || item.salePrice || ''}
+                              onChange={(e) => setProductPrices({ ...productPrices, [item._id]: e.target.value })}
                               className="border p-2 w-32 rounded"
                               min="0"
+                              aria-label={`Giá bán ${item.name}`}
                             />
-                            {!item.salePrice && <span className="text-red-500 ml-2">Chưa đặt giá</span>}
                           </div>
                         ))}
+                        <button
+                          onClick={handleProductPriceUpdate}
+                          className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                          disabled={loading || !Object.keys(productPrices).length}
+                          aria-label="Cập nhật giá sản phẩm"
+                        >
+                          Cập nhật giá
+                        </button>
                       </div>
-                      <button
-                        onClick={handleProductPriceUpdate}
-                        className="bg-blue-500 text-white px-4 py-2 rounded mt-4 hover:bg-blue-600"
-                        disabled={loading || Object.keys(productPrices).length === 0}
-                      >
-                        Cập nhật giá
-                      </button>
                     </div>
                   )}
 
                   {activeTab === 'transactions' && (
                     <div>
                       <h3 className="text-lg font-medium mb-2">Lịch Sử Giao Dịch</h3>
-                      <div className="mb-4 flex flex-col sm:flex-row gap-4">
-                        <div className="flex-1">
-                          <label className="block text-sm font-medium mb-1">Khoảng thời gian:</label>
-                          <DatePicker
-                            selectsRange
-                            startDate={dateRange[0]}
-                            endDate={dateRange[1]}
-                            onChange={setDateRange}
-                            className="border p-2 w-full rounded"
-                          />
+                      <div className="mb-4">
+                        <label className="block text-sm font-medium mb-1">Phòng:</label>
+                        <Select
+                          options={rooms.map(r => ({ value: r._id, label: `Phòng ${r.number}` }))}
+                          value={filter.room}
+                          onChange={(selected) => setFilter({ ...filter, room: selected })}
+                          className="w-full"
+                          placeholder="Chọn phòng"
+                          isClearable
+                        />
+                      </div>
+                      <div className="mb-4">
+                        <label className="block text-sm font-medium mb-1">Loại nghỉ:</label>
+                        <Select
+                          options={[
+                            { value: 'hourly', label: 'Nghỉ giờ' },
+                            { value: 'overnight', label: 'Qua đêm' },
+                          ]}
+                          value={filter.type}
+                          onChange={(selected) => setFilter({ ...filter, type: selected })}
+                          className="w-full"
+                          placeholder="Chọn loại nghỉ"
+                          isClearable
+                        />
+                      </div>
+                      <div className="mb-4">
+                        <label className="block text-sm font-medium mb-1">Khoảng thời gian:</label>
+                        <DatePicker
+                          selectsRange
+                          startDate={dateRange[0]}
+                          endDate={dateRange[1]}
+                          onChange={(update) => setDateRange(update)}
+                          className="border p-2 w-full rounded"
+                          dateFormat="dd/MM/yyyy"
+                          placeholderText="Chọn khoảng thời gian"
+                        />
+                      </div>
+                      <table className="w-full border-collapse">
+                        <thead>
+                          <tr className="bg-gray-100">
+                            <th className="border p-2 text-left">Phòng</th>
+                            <th className="border p-2 text-left">Thời gian vào</th>
+                            <th className="border p-2 text-left">Thời gian ra</th>
+                            <th className="border p-2 text-left">Tổng tiền</th>
+                            <th className="border p-2 text-left">Loại</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredTransactions.map(t => {
+                            const room = rooms.find(r => r._id === t.roomId);
+                            return (
+                              <tr key={t._id} className="border-b">
+                                <td className="border p-2">{room?.number || 'N/A'}</td>
+                                <td className="border p-2">{new Date(t.checkInTime).toLocaleString('vi-VN')}</td>
+                                <td className="border p-2">{new Date(t.checkOutTime).toLocaleString('vi-VN')}</td>
+                                <td className="border p-2">{t.total.toLocaleString('vi-VN')} VND</td>
+                                <td className="border p-2">{t.type === 'hourly' ? 'Nghỉ giờ' : 'Qua đêm'}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {activeTab === 'analytics' && (
+                    <div>
+                      <h3 className="text-lg font-medium mb-2">Phân tích</h3>
+                      <div className="mb-4">
+                        <h4 className="text-md font-medium mb-2">Biểu đồ doanh thu</h4>
+                        <canvas id="revenueChart" className="w-full h-64"></canvas>
+                      </div>
+                      <div className="space-y-4">
+                        <div>
+                          <h4 className="text-sm font-medium">Phòng sử dụng nhiều nhất:</h4>
+                          <p>
+                            {analytics.topRoom
+                              ? `Phòng ${rooms.find(r => r._id === analytics.topRoom.id)?.number || 'Không xác định'} (${analytics.topRoom.count} lượt)`
+                              : 'Chưa có dữ liệu'}
+                          </p>
                         </div>
-                        <div className="flex-1">
-                          <label className="block text-sm font-medium mb-1">Phòng:</label>
-                          <Select
-                            options={rooms.map(room => ({ value: room._id, label: `Phòng ${room.number}` }))}
-                            value={filter.room}
-                            onChange={(option) => setFilter({ ...filter, room: option })}
-                            isClearable
-                            className="w-full"
-                          />
+                        <div>
+                          <h4 className="text-sm font-medium">Sản phẩm bán chạy nhất:</h4>
+                          <p>
+                            {analytics.topItem
+                              ? `${inventory.find(i => i._id === analytics.topItem.id)?.name || 'Không xác định'} (${analytics.topItem.count} lượt)`
+                              : 'Chưa có dữ liệu'}
+                          </p>
                         </div>
-                        <div className="flex-1">
-                          <label className="block text-sm font-medium mb-1">Loại nghỉ:</label>
-                          <Select
-                            options={[
-                              { value: 'hourly', label: 'Nghỉ giờ' },
-                              { value: 'overnight', label: 'Qua đêm' },
-                            ]}
-                            value={filter.type}
-                            onChange={(option) => setFilter({ ...filter, type: option })}
-                            isClearable
-                            className="w-full"
-                          />
+                        <div>
+                          <h4 className="text-sm font-medium">Giờ cao điểm:</h4>
+                          <p>{analytics.peakHour !== null ? `${analytics.peakHour}:00 - ${analytics.peakHour + 1}:00` : 'Chưa có dữ liệu'}</p>
                         </div>
                       </div>
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse">
-                          <thead>
-                            <tr className="bg-gray-100">
-                              <th className="p-2">Phòng</th>
-                              <th className="p-2">Thời gian vào</th>
-                              <th className="p-2">Thời gian ra</th>
-                              <th className="p-2">Loại</th>
-                              <th className="p-2">Tổng tiền</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {filteredTransactions.map(tx => (
-                              const room = rooms.find(r => r._id === tx.roomId);
-                              return (
-                                <tr key={tx._id} className="border-b">
-                                  <td className="p-2">{room?.number || 'N/A'}</td>
-                                  <td className="p-2">{new Date(tx.checkInTime).toLocaleString('vi-VN')}</td>
-                                  <td className="p-2">{new Date(tx.checkOutTime).toLocaleString('vi-VN')}</td>
-                                  <td className="p-2">{tx.type === 'hourly' ? 'Nghỉ giờ' : 'Qua đêm'}</td>
-                                  <td className="p-2">{tx.total.toLocaleString('vi-VN')} VND</td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                </div>
+                    </div>
+                  )}
+                </section>
               )}
+            </main>
+          </div>
+        </Suspense>
+      );
+    });
 
-              {activeTab === 'analytics' && (
-                <div>
-                  <h3 className="text-lg font-medium mb-2">Phân tích</h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    <div className="bg-gray-100 p-4 rounded-lg">
-                      <h4 className="font-medium">Phòng sử dụng nhiều nhất</h4>
-                      <p>{analytics.topRoom ? `Phòng ${rooms.find(r => r._id === analytics.topRoom.id)?.number} (${analytics.topRoom.count} lượt)` : 'Chưa có dữ liệu'}</p>
-                    </div>
-                    <div className="bg-gray-100 p-4 rounded-lg">
-                      <h4 className="font-medium">Sản phẩm bán chạy</h4>
-                      <p>{analytics.topItem ? `${inventory.find(i => i._id === analytics.topItem.id)?.name} (${analytics.topItem.count} đơn vị)` : 'Chưa có dữ liệu'}</p>
-                    </div>
-                    <div className="bg-gray-100 p-4 rounded-lg">
-                      <h4 className="font-medium">Giờ cao điểm</h4>
-                      <p>{analytics.peakHour !== undefined ? `${analytics.peakHour}:00 - ${analytics.peakHour + 1}:00` : 'Chưa có dữ liệu'}</p>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </section>
-          )}
-          
-          {/* Báo cáo */}
-          <section className="mb-8 bg-white p-6 rounded-lg shadow-md">
-            <div className="flex flex-col sm:flex-row justify-between items-center mb-4">
-              <h2 className="text-xl md:text-2xl font-semibold mb-2 sm:mb-0">Báo Cáo Thu Chi</h2>
-              <button
-                onClick={fetchData}
-                className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
-              >
-                Làm mới
-              </button>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-              <div className="bg-gray-100 p-4 rounded-lg shadow">
-                <h3 className="text-lg font-medium">Doanh thu ngày</h3>
-                <p className="text-2xl">{report.daily.toLocaleString('vi-VN')} VND</p>
-              </div>
-              <div className="bg-gray-100 p-4 rounded-lg shadow">
-                <h3 className="text-lg font-medium">Doanh thu tuần</h3>
-                <p className="text-2xl">{report.weekly.toLocaleString('vi-VN')} VND</p>
-              </div>
-              <div className="bg-gray-100 p-4 rounded-lg shadow">
-                <h3 className="text-lg font-medium">Doanh thu tháng</h3>
-                <p className="text-2xl">{report.monthly.toLocaleString('vi-VN')} VND</p>
-              </div>
-            </div>
-            <canvas id="myChart" className="max-w-full"></canvas>
-            <script type="text/babel">
-              useEffect(() => {
-                const ctx = document.getElementById('myChart').getContext('2d');
-                const chart = new Chart(ctx, {
-                  type: 'bar',
-                  data: {
-                    labels: ['Ngày', 'Tuần', 'Tháng'],
-                    datasets: [{
-                      label: 'Doanh thu (VND)',
-                      data: [{report.daily}, {report.weekly}, {report.monthly}],
-                      backgroundColor: ['#2563eb', '#4a90e2', '#90cdf4'],
-                    }],
-                  },
-                  options: {
-                    responsive: true,
-                    scales: {
-                      y: { beginAtZero: true },
-                    },
-                  },
-                });
-                return () => chart.destroy();
-              }, [report]);
-            </script>
-          </section>
-        </main>
-      </div>
-    </Suspense>
-  );
-});
-
-ReactDOM.render(<App />, document.getElementById('root'));
-</script>
-<style type="text/css">
-@media print {
-  body * {
-    visibility: hidden;
-  }
-  .print-content, .print-content * {
-    visibility: visible;
-  }
-  .print-content {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
-  }
-}
-@keyframes fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-</style>
+    ReactDOM.render(<App />, document.getElementById('root'));
+  </script>
 </body>
 </html>
