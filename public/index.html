@@ -39,6 +39,8 @@
   <script type="text/babel">
     const { useState, useEffect, useCallback, useMemo, lazy, Suspense } = React;
     const Draggable = window.ReactDraggable.default;
+    const Select = window.ReactSelect.default;
+    const DatePicker = window.ReactDatePicker.default;
 
     // Lazy-load components
     const ToastContainer = lazy(() => Promise.resolve({
@@ -184,17 +186,24 @@
       const [toasts, setToasts] = useState([]);
       const [invoice, setInvoice] = useState(null);
       const [transactions, setTransactions] = useState([]);
-      const [dateRange, setDateRange] = useState([new Date(), new Date()]);
+      const [dateRange, setDateRange] = useState([null, null]);
       const [filter, setFilter] = useState({ room: null, type: null });
       const [bulkInventory, setBulkInventory] = useState([{ name: '', quantity: 0, purchasePrice: 0, salePrice: 0 }]);
-      const socket = useMemo(() => io(), []);
+      const socket = useMemo(() => io({
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000,
+      }), []);
 
       // Fetch initial data and set up WebSocket
       useEffect(() => {
         fetchData();
-        const interval = setInterval(() => setRooms(prev => [...prev]), 60000); // Refresh UI every minute
-        socket.on('roomUpdate', setRooms);
+        const interval = setInterval(() => setRooms(prev => [...prev]), 60000);
+        socket.on('connect', () => console.log('WebSocket connected'));
+        socket.on('roomUpdate', (data) => setRooms(data.rooms));
         socket.on('inventoryUpdate', setInventory);
+        socket.on('disconnect', () => console.log('WebSocket disconnected, retrying...'));
+        socket.on('reconnect', () => addToast('Kết nối WebSocket khôi phục', 'success'));
         return () => {
           clearInterval(interval);
           socket.disconnect();
@@ -230,7 +239,7 @@
           setRooms(roomsRes.data);
           setInventory(inventoryRes.data);
           setReport(reportRes.data);
-          setTransactions(transactionsRes.data);
+          setTransactions(transactionsRes.data || []);
         } catch (error) {
           addToast(`Lỗi khi lấy dữ liệu: ${error.message}`, 'error');
         } finally {
@@ -271,11 +280,11 @@
           const itemDetails = await Promise.all(
             items.map(async (item) => {
               const inventoryItem = inventory.find(i => i._id === item.itemId);
-              return `${inventoryItem.name} x${item.quantity} (${(inventoryItem.salePrice * item.quantity).toLocaleString('vi-VN')} VND)`;
+              return `${inventoryItem?.name || 'N/A'} x${item.quantity} (${(inventoryItem?.salePrice * item.quantity || 0).toLocaleString('vi-VN')} VND)`;
             })
           );
           setInvoice({
-            roomNumber: room.number,
+            roomNumber: room?.number || 'N/A',
             checkInTime,
             checkOutTime,
             hoursUsed,
@@ -448,11 +457,12 @@
 
       // Filtered transactions
       const filteredTransactions = useMemo(() => {
+        if (!transactions?.length) return [];
         return transactions.filter((t) => {
           const roomMatch = !filter.room || t.roomId === filter.room?.value;
           const typeMatch = !filter.type || t.type === filter.type?.value;
-          const dateMatch = !dateRange[0] || !dateRange[1] ||
-            (new Date(t.checkOutTime) >= dateRange[0] && new Date(t.checkOutTime) <= dateRange[1]);
+          const dateMatch = (!dateRange[0] || !dateRange[1]) ||
+            (t.checkOutTime && new Date(t.checkOutTime) >= dateRange[0] && new Date(t.checkOutTime) <= dateRange[1]);
           return roomMatch && typeMatch && dateMatch;
         });
       }, [transactions, filter, dateRange]);
@@ -465,11 +475,11 @@
 
         transactions.forEach(t => {
           roomUsage[t.roomId] = (roomUsage[t.roomId] || 0) + 1;
-          t.items.forEach(item => {
+          t.items?.forEach(item => {
             itemSales[item.itemId] = (itemSales[item.itemId] || 0) + item.quantity;
           });
           const hour = new Date(t.checkInTime).getHours();
-          hourlyRevenue[hour] += t.total;
+          hourlyRevenue[hour] += t.total || 0;
         });
 
         const topRoom = Object.entries(roomUsage).sort((a, b) => b[1] - a[1])[0];
@@ -738,35 +748,35 @@
                                 })}
                                 className="border p-2 w-full rounded"
                                 aria-label="Ghi chú phụ thu"
-                              />
+                              </span>
                             </div>
                           </>
                         )}
                         <div className="flex justify-end space-x-2">
                           {selectedRoom.status === 'vacant' && (
                             <button
-                              onClick={() => handleCheckIn(selectedRoom._id)}
-                              className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                              onClick={() => handleCheckIn(selectedRoom._id) }
+                              className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-50"
                               disabled={loading || (checkInData.type === 'overnight' && (!checkInData.cccd || !checkInData.fullName))}
-                              aria-label="Check-in phòng"
+                              aria-label="Check-in"
                             >
-                              Check-In
+                              Check-in
                             </button>
                           )}
                           {selectedRoom.status === 'occupied' && (
                             <button
-                              onClick={() => handleCheckOut(selectedRoom._id)}
-                              className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
+                              onClick={() => handleCheckOut(selectedRoom._id) }
+                              className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-50"
                               disabled={loading}
-                              aria-label="Check-out phòng"
+                              aria-label="Check-out"
                             >
-                              Check-Out
+                              Check-out
                             </button>
                           )}
                           <button
                             onClick={() => setSelectedRoom(null)}
                             className="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600"
-                            aria-label="Đóng modal"
+                            aria-label="Đóng"
                           >
                             Đóng
                           </button>
@@ -774,13 +784,13 @@
                       </div>
                     )}
                   </div>
-                </div>
+              </div>
               )}
 
-              {/* Admin Panel */}
+            {/* Admin Panel */}
               {isAdmin && (
                 <section className="mb-8 bg-white p-6 rounded-lg shadow-md">
-                  <h2 className="text-xl md:text-2xl font-semibold mb-4">Bảng Quản Trị</h2>
+                  <h2 className="text-xl md:text-2xl font-semibold mb-4">Bảng Quản trị</h2>
                   <div className="flex flex-wrap border-b mb-4">
                     {['prices', 'inventory', 'productPrices', 'transactions', 'analytics'].map(tab => (
                       <button
@@ -789,14 +799,13 @@
                         onClick={() => setActiveTab(tab)}
                         aria-label={`Chuyển sang tab ${tab}`}
                       >
-                        {tab === 'prices' ? 'Cài Đặt Giá' :
+                        {tab === 'prices' ? 'Cài đặt Giá' :
                          tab === 'inventory' ? 'Nhập Kho' :
                          tab === 'productPrices' ? 'Giá Sản Phẩm' :
                          tab === 'transactions' ? 'Lịch Sử Giao Dịch' : 'Phân Tích'}
                       </button>
                     ))}
                   </div>
-
                   {activeTab === 'prices' && (
                     <div>
                       <h3 className="text-lg font-medium mb-2">Cài Đặt Giá</h3>
@@ -845,7 +854,6 @@
                       </div>
                     </div>
                   )}
-
                   {activeTab === 'inventory' && (
                     <div>
                       <h3 className="text-lg font-medium mb-2">Nhập Kho</h3>
@@ -856,7 +864,7 @@
                           type="file"
                           accept=".xlsx"
                           onChange={handleExcelImport}
-                          className="border p-2 w-full rounded"
+                          className="border p-2 rounded"
                           aria-label="Nhập kho bằng Excel"
                         />
                         <p className="text-sm text-gray-500 mt-1">
@@ -940,7 +948,7 @@
                                 setBulkInventory(newItems);
                               }}
                               className="border p-2 rounded"
-                              aria-label={`Tên sản phẩm hàng loạt ${index + 1}`}
+                              aria-label="Tên sản phẩm hàng loạt ${index + 1}"
                             />
                             <input
                               type="number"
@@ -953,7 +961,7 @@
                               }}
                               className="border p-2 rounded"
                               min="0"
-                              aria-label={`Số lượng hàng loạt ${index + 1}`}
+                              aria-label="Số lượng hàng loạt ${index + 1}"
                             />
                             <input
                               type="number"
@@ -966,7 +974,7 @@
                               }}
                               className="border p-2 rounded"
                               min="0"
-                              aria-label={`Giá nhập hàng loạt ${index + 1}`}
+                              aria-label="Giá nhập hàng loạt ${index + 1}"
                             />
                             <input
                               type="number"
@@ -979,7 +987,7 @@
                               }}
                               className="border p-2 rounded"
                               min="0"
-                              aria-label={`Giá bán hàng loạt ${index + 1}`}
+                              aria-label="Giá bán hàng loạt ${index + 1}"
                             />
                           </div>
                         ))}
@@ -1002,14 +1010,13 @@
                         </div>
                       </div>
                     </div>
-                  )}
-
+                  ))}
                   {activeTab === 'productPrices' && (
                     <div>
                       <h3 className="text-lg font-medium mb-2">Cập Nhật Giá Sản Phẩm</h3>
                       <div className="space-y-4">
                         {inventory.map(item => (
-                          <div key={item._id} className="flex items-center space-x-2">
+                          <div key={item._id} className="flex items-center-x-2">
                             <span className="flex-grow">{item.name}</span>
                             <input
                               type="number"
@@ -1032,76 +1039,79 @@
                         </button>
                       </div>
                     </div>
-                  )}
-
+                  ))}
                   {activeTab === 'transactions' && (
                     <div>
-                      <h3 className="text-lg font-medium mb-2">Lịch Sử Giao Dịch</h3>
+                      <h3 className="text-lg font-medium mb-4">Lịch Sử Giao Dịch</h3>
                       <div className="mb-4">
-                        <label className="block text-sm font-medium mb-1">Phòng:</label>
+                        <label className="block text-sm font-medium mb-1" htmlFor="room-filter">Phòng:</label>
                         <Select
+                          id="room-filter"
                           options={rooms.map(r => ({ value: r._id, label: `Phòng ${r.number}` }))}
                           value={filter.room}
-                          onChange={(selected) => setFilter({ ...filter, room: selected })}
+                          onChange={(selected) => setFilter({ ...filter, room: selected || null })}
                           className="w-full"
                           placeholder="Chọn phòng"
                           isClearable
                         />
                       </div>
                       <div className="mb-4">
-                        <label className="block text-sm font-medium mb-1">Loại nghỉ:</label>
+                        <label className="block text-sm font-medium mb-1" htmlFor="type-filter">Loại nghỉ:</label>
                         <Select
+                          id="type-filter"
                           options={[
                             { value: 'hourly', label: 'Nghỉ giờ' },
                             { value: 'overnight', label: 'Qua đêm' },
                           ]}
                           value={filter.type}
-                          onChange={(selected) => setFilter({ ...filter, type: selected })}
+                          onChange={(selected) => setFilter({ ...filter, type: selected || null })}
                           className="w-full"
                           placeholder="Chọn loại nghỉ"
                           isClearable
                         />
                       </div>
                       <div className="mb-4">
-                        <label className="block text-sm font-medium mb-1">Khoảng thời gian:</label>
+                        <label className="block text-sm font-medium mb-1" htmlFor="date-range">Khoảng thời gian:</label>
                         <DatePicker
+                          id="date-range"
                           selectsRange
-                          startDate={dateRange[0]}
-                          endDate={dateRange[1]}
-                          onChange={(update) => setDateRange(update)}
+                          startDate={dateRange[0] || null}
+                          endDate={dateRange[1] || null}
+                          onChange={(update) => setDateRange(update.map(d => d || null))}
                           className="border p-2 w-full rounded"
                           dateFormat="dd/MM/yyyy"
                           placeholderText="Chọn khoảng thời gian"
+                          isClearable
                         />
                       </div>
-                      <table className="w-full border-collapse">
-                        <thead>
-                          <tr className="bg-gray-100">
-                            <th className="border p-2 text-left">Phòng</th>
-                            <th className="border p-2 text-left">Thời gian vào</th>
-                            <th className="border p-2 text-left">Thời gian ra</th>
-                            <th className="border p-2 text-left">Tổng tiền</th>
-                            <th className="border p-2 text-left">Loại</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {filteredTransactions.map(t => {
-                            const room = rooms.find(r => r._id === t.roomId);
-                            return (
+                      {filteredTransactions.length === 0 ? (
+                        <p className="text-gray-500">Không có giao dịch nào phù hợp.</p>
+                      ) : (
+                        <table className="w-full border-collapse">
+                          <thead>
+                            <tr className="bg-gray-100">
+                              <th className="border p-2 text-left">Phòng</th>
+                              <th className="border p-2 text-left">Thời gian vào</th>
+                              <th className="border p-2 text-left">Thời gian ra</th>
+                              <th className="border p-2 text-left">Tổng tiền</th>
+                              <th className="border p-2 text-left">Loại</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filteredTransactions.map(t => (
                               <tr key={t._id} className="border-b">
-                                <td className="border p-2">{room?.number || 'N/A'}</td>
-                                <td className="border p-2">{new Date(t.checkInTime).toLocaleString('vi-VN')}</td>
-                                <td className="border p-2">{new Date(t.checkOutTime).toLocaleString('vi-VN')}</td>
-                                <td className="border p-2">{t.total.toLocaleString('vi-VN')} VND</td>
-                                <td className="border p-2">{t.type === 'hourly' ? 'Nghỉ giờ' : 'Qua đêm'}</td>
+                                <td className="border p-2">{rooms.find(r => r._id === t.roomId)?.number || 'Không xác định'}</td>
+                                <td className="border p-2">{t.checkInTime ? new Date(t.checkInTime).toLocaleString('vi-VN') : 'N/A'}</td>
+                                <td className="border p-2">{t.checkOutTime ? new Date(t.checkOutTime).toLocaleString('vi-VN') : 'N/A'}</td>
+                                <td className="border p-2">{t.total ? t.total.toLocaleString('vi-VN') + ' VND' : '0 VND'}</td>
+                                <td className="border p-2">{t.type === 'hourly' ? 'Nghỉ giờ' : t.type === 'overnight' ? 'Qua đêm' : 'N/A'}</td>
                               </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
                     </div>
-                  )}
-
+                  ))}
                   {activeTab === 'analytics' && (
                     <div>
                       <h3 className="text-lg font-medium mb-2">Phân tích</h3>
@@ -1132,14 +1142,14 @@
                         </div>
                       </div>
                     </div>
-                  )}
+                  ))}
                 </section>
-              )}
+              ))}
             </main>
           </div>
         </Suspense>
       );
-    });
+    }));
 
     ReactDOM.render(<App />, document.getElementById('root'));
   </script>
