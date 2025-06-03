@@ -10,14 +10,7 @@
   <script src="https://cdn.jsdelivr.net/npm/axios@1.7.7/dist/axios.min.js" crossorigin="anonymous"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.25.2/babel.min.js" crossorigin="anonymous"></script>
-  <!-- Chart.js with fallback -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" crossorigin="anonymous" defer></script>
-  <script>
-    if (!window.Chart) {
-      document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" defer><\/script>');
-    }
-  </script>
-  <!-- Additional Libraries -->
   <script src="https://cdn.jsdelivr.net/npm/react-datepicker@7.3.0/dist/react-datepicker.min.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/react-select@5.8.0/dist/react-select.min.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js" crossorigin="anonymous" defer></script>
@@ -195,38 +188,16 @@
         reconnectionDelay: 1000,
       }), []);
 
-      // Fetch initial data and set up WebSocket
-      useEffect(() => {
-        fetchData();
-        const interval = setInterval(() => setRooms(prev => [...prev]), 60000);
-        socket.on('connect', () => console.log('WebSocket connected'));
-        socket.on('roomUpdate', (data) => setRooms(data.rooms));
-        socket.on('inventoryUpdate', setInventory);
-        socket.on('disconnect', () => console.log('WebSocket disconnected, retrying...'));
-        socket.on('reconnect', () => addToast('Kết nối WebSocket khôi phục', 'success'));
-        return () => {
-          clearInterval(interval);
-          socket.disconnect();
+      // Debounce fetchData
+      const debounce = (func, wait) => {
+        let timeout;
+        return (...args) => {
+          clearTimeout(timeout);
+          timeout = setTimeout(() => func(...args), wait);
         };
-      }, [socket]);
+      };
 
-      // Persist active tab
-      useEffect(() => {
-        localStorage.setItem('activeTab', activeTab);
-      }, [activeTab]);
-
-      // Toast management
-      const addToast = useCallback((message, type, action = null) => {
-        const id = Date.now();
-        setToasts(prev => [...prev, { id, message, type, action }]);
-        setTimeout(() => removeToast(id), 5000);
-      }, []);
-
-      const removeToast = useCallback((id) => {
-        setToasts(prev => prev.filter(toast => toast.id !== id));
-      }, []);
-
-      // Fetch data
+      // Fetch initial data
       const fetchData = useCallback(async () => {
         setLoading(true);
         try {
@@ -247,6 +218,36 @@
         }
       }, [addToast]);
 
+      const debouncedFetchData = useMemo(() => debounce(fetchData, 500), [fetchData]);
+
+      // WebSocket setup
+      useEffect(() => {
+        debouncedFetchData();
+        socket.on('connect', () => console.log('WebSocket connected'));
+        socket.on('roomUpdate', (data) => setRooms(data.rooms));
+        socket.on('inventoryUpdate', setInventory);
+        socket.on('disconnect', () => console.log('WebSocket disconnected, retrying...'));
+        socket.on('reconnect', () => addToast('Kết nối WebSocket khôi phục', 'success'));
+        socket.on('error', () => addToast('Lỗi kết nối WebSocket', 'error'));
+        return () => socket.disconnect();
+      }, [socket, debouncedFetchData, addToast]);
+
+      // Persist active tab
+      useEffect(() => {
+        localStorage.setItem('activeTab', activeTab);
+      }, [activeTab]);
+
+      // Toast management
+      const addToast = useCallback((message, type, action = null) => {
+        const id = Date.now();
+        setToasts(prev => [...prev, { id, message, type, action }]);
+        setTimeout(() => removeToast(id), 5000);
+      }, []);
+
+      const removeToast = useCallback((id) => {
+        setToasts(prev => prev.filter(toast => toast.id !== id));
+      }, []);
+
       // Check-in handler
       const handleCheckIn = useCallback(async (roomId) => {
         setLoading(true);
@@ -259,7 +260,7 @@
             cccd: checkInData.cccd,
             fullName: checkInData.fullName,
           });
-          await fetchData();
+          await debouncedFetchData();
           setCheckInData({ items: [], surcharge: { amount: 0, note: '' }, type: 'hourly', cccd: '', fullName: '' });
           setSelectedRoom(null);
           addToast('Check-in thành công', 'success');
@@ -268,7 +269,7 @@
         } finally {
           setLoading(false);
         }
-      }, [checkInData, fetchData, addToast]);
+      }, [checkInData, debouncedFetchData, addToast]);
 
       // Check-out handler
       const handleCheckOut = useCallback(async (roomId) => {
@@ -292,14 +293,14 @@
             surcharge: checkInData.surcharge,
             total,
           });
-          await fetchData();
+          await debouncedFetchData();
           setCheckInData({ items: [], surcharge: { amount: 0, note: '' }, type: 'hourly', cccd: '', fullName: '' });
           setSelectedRoom(null);
           addToast('Check-out thành công', 'success', {
             label: 'Hoàn tác',
             callback: async () => {
               await axios.post('/api/undo-checkout', { roomId });
-              await fetchData();
+              await debouncedFetchData();
               addToast('Hoàn tác check-out thành công', 'success');
             },
           });
@@ -308,7 +309,7 @@
         } finally {
           setLoading(false);
         }
-      }, [checkInData, rooms, inventory, fetchData, addToast]);
+      }, [checkInData, rooms, inventory, debouncedFetchData, addToast]);
 
       // Clean room handler
       const handleCleanRoom = useCallback(async (roomId) => {
@@ -316,7 +317,7 @@
           setLoading(true);
           try {
             await axios.post('/api/clean-room', { roomId });
-            await fetchData();
+            await debouncedFetchData();
             setSelectedRoom(null);
             addToast('Phòng đã được dọn sạch', 'success');
           } catch (error) {
@@ -325,7 +326,7 @@
             setLoading(false);
           }
         }
-      }, [fetchData, addToast]);
+      }, [debouncedFetchData, addToast]);
 
       // Admin login
       const handleAdminLogin = useCallback(() => {
@@ -362,14 +363,14 @@
           await axios.post('/api/inventory/import', formData, {
             headers: { 'Content-Type': 'multipart/form-data' }
           });
-          await fetchData();
+          await debouncedFetchData();
           addToast('Nhập kho thành công', 'success');
         } catch (error) {
           addToast(`Lỗi khi nhập kho: ${error.response?.data?.error || error.message}`, 'error');
         } finally {
           setLoading(false);
         }
-      }, [fetchData, addToast]);
+      }, [debouncedFetchData, addToast]);
 
       // Manual inventory
       const handleManualInventory = useCallback(async () => {
@@ -385,7 +386,7 @@
             purchasePrice: manualInventory.purchasePrice,
             salePrice: manualInventory.salePrice || 0,
           });
-          await fetchData();
+          await debouncedFetchData();
           setManualInventory({ name: '', quantity: 0, purchasePrice: 0, salePrice: 0 });
           addToast('Thêm sản phẩm thành công', 'success');
         } catch (error) {
@@ -393,7 +394,7 @@
         } finally {
           setLoading(false);
         }
-      }, [manualInventory, fetchData, addToast]);
+      }, [manualInventory, debouncedFetchData, addToast]);
 
       // Bulk inventory
       const handleBulkInventory = useCallback(async () => {
@@ -405,7 +406,7 @@
         setLoading(true);
         try {
           await axios.post('/api/inventory/bulk', validItems);
-          await fetchData();
+          await debouncedFetchData();
           setBulkInventory([{ name: '', quantity: 0, purchasePrice: 0, salePrice: 0 }]);
           addToast('Nhập kho hàng loạt thành công', 'success');
         } catch (error) {
@@ -413,7 +414,7 @@
         } finally {
           setLoading(false);
         }
-      }, [bulkInventory, fetchData, addToast]);
+      }, [bulkInventory, debouncedFetchData, addToast]);
 
       // Update product prices
       const handleProductPriceUpdate = useCallback(async () => {
@@ -425,14 +426,14 @@
             )
           );
           setProductPrices({});
-          await fetchData();
+          await debouncedFetchData();
           addToast('Cập nhật giá sản phẩm thành công', 'success');
         } catch (error) {
           addToast(`Lỗi khi cập nhật giá sản phẩm: ${error.response?.data?.error || error.message}`, 'error');
         } finally {
           setLoading(false);
         }
-      }, [productPrices, fetchData, addToast]);
+      }, [productPrices, debouncedFetchData, addToast]);
 
       // Room styling
       const getRoomColor = useCallback((status) => ({
@@ -483,7 +484,7 @@
         });
 
         const topRoom = Object.entries(roomUsage).sort((a, b) => b[1] - a[1])[0];
-        const topItem = Object.entries(itemSales).sort((a, b) => b[1] - a[1])[0];
+        const topItem = Object.entries(itemSales).sort((a, b) => b[1 - a[1])[0];
         const peakHour = hourlyRevenue.indexOf(Math.max(...hourlyRevenue));
 
         return {
@@ -507,7 +508,7 @@
       useEffect(() => {
         const ctx = document.getElementById('revenueChart')?.getContext('2d');
         if (ctx && window.Chart) {
-          const chart = new Chart(ctx, {
+          const chart = new window.Chart(ctx, {
             type: 'bar',
             data: chartData,
             options: {
@@ -577,7 +578,7 @@
                 <div className="flex flex-col sm:flex-row justify-between items-center mb-4">
                   <h2 className="text-xl md:text-2xl font-semibold mb-2 sm:mb-0">Trạng Thái Phòng</h2>
                   <button
-                    onClick={fetchData}
+                    onClick={debouncedFetchData}
                     className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
                     aria-label="Làm mới dữ liệu"
                   >
@@ -748,15 +749,15 @@
                                 })}
                                 className="border p-2 w-full rounded"
                                 aria-label="Ghi chú phụ thu"
-                              </span>
+                              />
                             </div>
                           </>
                         )}
                         <div className="flex justify-end space-x-2">
                           {selectedRoom.status === 'vacant' && (
                             <button
-                              onClick={() => handleCheckIn(selectedRoom._id) }
-                              className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-50"
+                              onClick={() => handleCheckIn(selectedRoom._id)}
+                              className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
                               disabled={loading || (checkInData.type === 'overnight' && (!checkInData.cccd || !checkInData.fullName))}
                               aria-label="Check-in"
                             >
@@ -765,8 +766,8 @@
                           )}
                           {selectedRoom.status === 'occupied' && (
                             <button
-                              onClick={() => handleCheckOut(selectedRoom._id) }
-                              className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-50"
+                              onClick={() => handleCheckOut(selectedRoom._id)}
+                              className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
                               disabled={loading}
                               aria-label="Check-out"
                             >
@@ -784,10 +785,10 @@
                       </div>
                     )}
                   </div>
-              </div>
+                </div>
               )}
 
-            {/* Admin Panel */}
+              {/* Admin Panel */}
               {isAdmin && (
                 <section className="mb-8 bg-white p-6 rounded-lg shadow-md">
                   <h2 className="text-xl md:text-2xl font-semibold mb-4">Bảng Quản trị</h2>
@@ -948,7 +949,7 @@
                                 setBulkInventory(newItems);
                               }}
                               className="border p-2 rounded"
-                              aria-label="Tên sản phẩm hàng loạt ${index + 1}"
+                              aria-label={`Tên sản phẩm hàng loạt ${index + 1}`}
                             />
                             <input
                               type="number"
@@ -961,7 +962,7 @@
                               }}
                               className="border p-2 rounded"
                               min="0"
-                              aria-label="Số lượng hàng loạt ${index + 1}"
+                              aria-label={`Số lượng hàng loạt ${index + 1}`}
                             />
                             <input
                               type="number"
@@ -974,7 +975,7 @@
                               }}
                               className="border p-2 rounded"
                               min="0"
-                              aria-label="Giá nhập hàng loạt ${index + 1}"
+                              aria-label={`Giá nhập hàng loạt ${index + 1}`}
                             />
                             <input
                               type="number"
@@ -987,7 +988,7 @@
                               }}
                               className="border p-2 rounded"
                               min="0"
-                              aria-label="Giá bán hàng loạt ${index + 1}"
+                              aria-label={`Giá bán hàng loạt ${index + 1}`}
                             />
                           </div>
                         ))}
@@ -1010,13 +1011,13 @@
                         </div>
                       </div>
                     </div>
-                  ))}
+                  )}
                   {activeTab === 'productPrices' && (
                     <div>
                       <h3 className="text-lg font-medium mb-2">Cập Nhật Giá Sản Phẩm</h3>
                       <div className="space-y-4">
                         {inventory.map(item => (
-                          <div key={item._id} className="flex items-center-x-2">
+                          <div key={item._id} className="flex items-center space-x-2">
                             <span className="flex-grow">{item.name}</span>
                             <input
                               type="number"
@@ -1039,7 +1040,7 @@
                         </button>
                       </div>
                     </div>
-                  ))}
+                  )}
                   {activeTab === 'transactions' && (
                     <div>
                       <h3 className="text-lg font-medium mb-4">Lịch Sử Giao Dịch</h3>
@@ -1111,7 +1112,7 @@
                         </table>
                       )}
                     </div>
-                  ))}
+                  )}
                   {activeTab === 'analytics' && (
                     <div>
                       <h3 className="text-lg font-medium mb-2">Phân tích</h3>
@@ -1142,14 +1143,14 @@
                         </div>
                       </div>
                     </div>
-                  ))}
+                  )}
                 </section>
-              ))}
+              )}
             </main>
           </div>
         </Suspense>
       );
-    }));
+    });
 
     ReactDOM.render(<App />, document.getElementById('root'));
   </script>
