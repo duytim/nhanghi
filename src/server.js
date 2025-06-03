@@ -11,7 +11,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: ['http://localhost:3000', 'https://your-production-domain.com'], // Thay bằng domain thực tế khi triển khai
+    origin: ['http://localhost:3000', 'https://nhanghi.onrender.com'], // Thay bằng domain thực tế khi triển khai
     methods: ['GET', 'POST'],
   }
 });
@@ -30,7 +30,7 @@ const checkMongoConnection = async (req, res, next) => {
 app.use(checkMongoConnection);
 
 // MongoDB Connection
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/nhanghi', {
+mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://duytim1994:duytim123@nhanghi.qyjrygr.mongodb.net/?retryWrites=true&w=majority&appName=Nhanghi', {
   useNewUrlParser: true,
   useUnifiedTopology: true
 }).then(() => console.log('MongoDB connected'))
