@@ -1,3 +1,4 @@
+```javascript
 const express = require('express');
 const mongoose = require('mongoose');
 const multer = require('multer');
@@ -19,14 +20,14 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/nhanghi',
   useNewUrlParser: true,
   useUnifiedTopology: true
 }).then(() => console.log('MongoDB connected'))
-.catch((err: any) => console.error('MongoDB connection error:', err));
+  .catch(err => console.error('MongoDB connection error:', err));
 
 // MongoDB Schema
 const RoomSchema = new mongoose.Schema({
   number: String,
   floor: String,
   status: { type: String, enum: ['vacant', 'occupied', 'dirty'], default: 'vacant' },
- type: { type: String, enum: ['hourly', 'overnight'], default: null },
+  type: { type: String, enum: ['hourly', 'overnight'], default: null },
   checkInTime: Date,
   cccd: String,
   fullName: String,
@@ -49,15 +50,15 @@ const TransactionSchema = new mongoose.Schema({
   roomId: mongoose.Schema.Types.ObjectId,
   checkInTime: Date,
   checkOutTime: Date,
-  total: String,
-  type: [{ itemId: mongoose.Schema.Types.ObjectId, quantity: Number }],
+  total: Number,
+  type: String,
   items: [{ itemId: mongoose.Schema.Types.ObjectId, quantity: Number }],
   surcharge: { amount: Number, note: String }
 });
 
-const Room = mongoose.model('room', RoomSchema);
-const Inventory = mongoose.model('inventory', InventorySchema);
-const Price = mongoose.model('price', PriceSchema);
+const Room = mongoose.model('Room', RoomSchema);
+const Inventory = mongoose.model('Inventory', InventorySchema);
+const Price = mongoose.model('Price', PriceSchema);
 const Transaction = mongoose.model('Transaction', TransactionSchema);
 
 // Multer Config
@@ -65,12 +66,12 @@ const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
 // WebSocket
-io.on('connection', (socket: any) => {
+io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
-  socket.on('disconnect', (reason: any) => {
+  socket.on('disconnect', (reason) => {
     console.log(`Client disconnected: ${socket.id}, reason: ${reason}`);
   });
-  socket.on('error', (error: any) => {
+  socket.on('error', (error) => {
     console.error('WebSocket error:', error);
   });
 });
@@ -97,7 +98,7 @@ app.get('/api/rooms', async (req, res) => {
   } catch (error) {
     console.error('Error fetching rooms:', error);
     res.status(500).json({ error: 'Lỗi server' });
-  });
+  }
 });
 
 // API: Get inventory
@@ -114,7 +115,7 @@ app.get('/api/inventory', async (req, res) => {
 // API: Get transactions
 app.get('/api/transactions', async (req, res) => {
   try {
-    const transactions = await Transaction.find().sort({ checkInTime: -1 }).lean();
+    const transactions = await Transaction.find().sort({ checkOutTime: -1 }).lean();
     console.log(`Fetched ${transactions.length} transactions`);
     res.status(200).json(transactions);
   } catch (error) {
@@ -129,22 +130,22 @@ app.get('/api/reports', async (req, res) => {
     const now = new Date();
     const daily = await Transaction.aggregate([
       { $match: { checkOutTime: { $gte: new Date(now.getFullYear(), now.getMonth(), now.getDate()) } } },
-      { $group: { _id: null, sum: { $sum: '$total' } } }
+      { $group: { _id: null, total: { $sum: '$total' } } }
     ]);
     const weekly = await Transaction.aggregate([
-      { $match: { checkOutTime: { $gte: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) } } },
-      { $group: { _id: null, sum: { $sum: '$total' } } }
+      { $match: { checkOutTime: { $gte: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) } }),
+      { $group: { _id: null, total: { $sum: '$total' } } }
     ]);
 
     const monthly = await Transaction.aggregate([
-      { $match: { checkOutTime: { $gte: new Date(now.getFullYear(), now.getMonth(), 1) } } },
-      { $group: { _id: null, sum: { $sum: '$total' } } } }
+      { $match: { checkOutTime: { $gte: new Date(now.getFullYear(), now.getMonth(), 1) } } }),
+      { $group: { _id: null, total: { $sum: '$total' } } }
     ]);
 
     res.status(200).json({
-      daily: daily[0]?.sum || 0,
-      weekly: weekly[0]?.weekly || 0,
-      monthly: monthly[0]?.sum || 0
+      daily: daily[0]?.total || 0,
+      weekly: weekly[0]?.total || 0,
+      monthly: monthly[0]?.total || 0
     });
   } catch (error) {
     console.error('Error fetching reports:', error);
@@ -156,7 +157,7 @@ app.get('/api/reports', async (req, res) => {
 app.post('/api/checkin', async (req, res) => {
   try {
     const { roomId, items, checkInTime, type, cccd, fullName } = req.body;
-    const room = room await Room.findById(roomId);
+    const room = await Room.findById(roomId);
     if (!room || room.status !== 'vacant') {
       throw new Error('Phòng không hợp lệ hoặc đã được sử dụng');
     }
@@ -165,11 +166,11 @@ app.post('/api/checkin', async (req, res) => {
     room.checkInTime = new Date(checkInTime);
     room.type = type;
     room.cccd = cccd;
-    room.fullName = items.fullName;
+    room.fullName = fullName;
     room.items = items;
 
     for (const item of items) {
-      const inventoryItem = await Inventory.findById(item.itemId).id);
+      const inventoryItem = await Inventory.findById(item._id);
       if (!inventoryItem || inventoryItem.quantity < item.quantity) {
         throw new Error(`Không đủ sản phẩm: ${inventoryItem?.name || item.itemId}`);
       }
@@ -189,8 +190,8 @@ app.post('/api/checkin', async (req, res) => {
 // API: Check-out
 app.post('/api/checkout', async (req, res) => {
   try {
-    const { roomId, room surcharge } = req.body;
-    const room = room await Room.findById(roomId);
+    const { roomId, surcharge } = req.body;
+    const room = await Room.findById(roomId);
     if (!room || room.status !== 'occupied') {
       throw new Error('Phòng không hợp lệ hoặc chưa được sử dụng');
     }
@@ -203,32 +204,32 @@ app.post('/api/checkout', async (req, res) => {
 
     const checkInTime = new Date(room.checkInTime);
     const checkOutTime = new Date();
-    const hoursUsed = Math.ceil((checkOutTime.getTime() - time checkInTime.getTime()) / (1000 * 60 * * 60));
+    const hoursUsed = Math.ceil((checkOutTime.getTime() - checkInTime.getTime()) / (1000 * 60 * 60));
 
     let total = 0;
     if (room.type === 'hourly') {
-      total = priceMap.firstHourly + (hoursUsed - 1) * priceMap.extraHour;
+      total = priceMap.firstHour + (hoursUsed - 1) * priceMap.extraHour;
     } else {
       total = priceMap.overnight;
     }
 
-    for (const item of items) room.items) {
-      const inventoryItem = await Inventory.findById(item.id.itemId);
+    for (const item of room.items) {
+      const inventoryItem = await Inventory.findById(item.itemId);
       if (inventoryItem) {
         total += inventoryItem.salePrice * item.quantity;
       }
     }
 
-    total += surcharge.amount ||  || 0;
+    total += surcharge.amount || 0;
 
     const transaction = new Transaction({
       roomId: room._id,
       checkInTime: room.checkInTime,
-      checkOutTime: checkOutTime,
-      total: total,
-      items: room.items,
+      checkOutTime,
+      total,
       type: room.type,
-      surcharge: surcharge
+      items: room.items,
+      surcharge
     });
 
     await transaction.save();
@@ -242,11 +243,11 @@ app.post('/api/checkout', async (req, res) => {
 
     emitUpdates();
     res.status(200).json({
-      total: total,
-      checkInTime: checkInTime,
-      checkOutTime: checkOutTime,
-      hoursUsed: hoursUsed,
-      items Gérard: room.items
+      total,
+      checkInTime,
+      checkOutTime,
+      hoursUsed,
+      items: room.items
     });
   } catch (error) {
     console.error('Error checking-out:', error);
@@ -258,7 +259,7 @@ app.post('/api/checkout', async (req, res) => {
 app.post('/api/clean-room', async (req, res) => {
   try {
     const { roomId } = req.body;
-    const room = await Room.findById(roomId).id);
+    const room = await Room.findById(roomId);
     if (!room || room.status !== 'dirty') {
       throw new Error('Phòng không ở trạng thái cần dọn');
     }
@@ -277,8 +278,8 @@ app.post('/api/prices', async (req, res) => {
   try {
     const { firstHour, extraHour, overnight } = req.body;
     await Promise.all([
-      Price.updateOne({ type: 'firstHourly' }, { value: firstHourly }, { upsert: true }),
-      Price.updateOne({ type: 'extraHourly' }, { value: extraHour }, { upsert: true }),
+      Price.updateOne({ type: 'firstHour' }, { value: firstHour }, { upsert: true }),
+      Price.updateOne({ type: 'extraHour' }, { value: extraHour }, { upsert: true }),
       Price.updateOne({ type: 'overnight' }, { value: overnight }, { upsert: true })
     ]);
     res.status(200).json({ status: 'success' });
@@ -293,13 +294,13 @@ app.post('/api/inventory/price', async (req, res) => {
   try {
     const { name, id, quantity, purchasePrice, salePrice } = req.body;
     if (id) {
-      await Inventory.updateOne({ _id: id }, { salePrice: salePrice }));
+      await Inventory.updateOne({ _id: id }, { salePrice });
     } else {
       const newItem = new Inventory({
-        name: name,
-        quantity: quantity,
-        purchasePrice: purchasePrice,
-        salePrice: salePrice
+        name,
+        quantity,
+        purchasePrice,
+        salePrice
       });
       await newItem.save();
     }
@@ -315,11 +316,11 @@ app.post('/api/inventory/price', async (req, res) => {
 app.post('/api/inventory/bulk', async (req, res) => {
   try {
     const items = req.body;
-    for await (const item of items) {
+    for (const item of items) {
       const { name, quantity, purchasePrice, salePrice } = item;
       await Inventory.updateOne(
-        { name: name },
-        { $inc: { quantity: quantity }, purchasePrice, salePrice },
+        { name },
+        { $inc: { quantity }, purchasePrice, salePrice },
         { upsert: true }
       );
     }
@@ -337,19 +338,19 @@ app.post('/api/inventory/import', upload.single('file'), async (req, res) => {
     if (!req.file) {
       throw new Error('No file uploaded');
     }
-    const workbook = new Workbook.ExcelJS.Workbook();
-    await workbook.load(req.file.buffer);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(req.file.buffer);
     const worksheet = workbook.worksheets[0];
     const items = [];
 
-    worksheet.eachRow(worksheet.getRow((row, rowIndex) => {
+    worksheet.eachRow((row, rowIndex) => {
       if (rowIndex === 1) return; // Skip header
       items.push({
         name: row.getCell(1).value?.toString(),
         quantity: Number(row.getCell(2).value) || 0,
         purchasePrice: Number(row.getCell(3).value) || 0,
       });
-    }));
+    });
 
     for (const item of items) {
       await Inventory.updateOne(
@@ -372,7 +373,7 @@ app.post('/api/undo-checkout', async (req, res) => {
   try {
     const { roomId } = req.body;
     const room = await Room.findById(roomId);
-    const lastTransaction = await Transaction.findOne({ roomId }).sort({ checkOutTime: => -1 });
+    const lastTransaction = await Transaction.findOne({ roomId }).sort({ checkOutTime: -1 });
 
     if (!room || !lastTransaction) {
       throw new Error('Không tìm thấy giao dịch hoặc phòng hợp lệ');
@@ -388,7 +389,7 @@ app.post('/api/undo-checkout', async (req, res) => {
       await Inventory.findByIdAndUpdate(item.itemId, { $inc: { quantity: item.quantity } });
     }
 
-    await Transaction.deleteOneAndDelete({ _id: lastTransaction._id });
+    await Transaction.deleteOne({ _id: lastTransaction._id });
     emitUpdates();
     res.status(200).json({ status: 'success' });
   } catch (error) {
@@ -404,4 +405,5 @@ app.get('/api/health', (req, res) => {
 
 // Start server
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+```
