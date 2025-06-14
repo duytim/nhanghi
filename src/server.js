@@ -23,7 +23,6 @@ app.get('/', (req, res) => {
 app.use(express.json());
 
 // Kết nối MongoDB Atlas
-mongoose.connect('mongodb+srv://duytim1994:duytim123@nhanghi.qyjrygr.mongodb.net/?retryWrites=true&w=majority&appName=Nhanghi');
 
 // Định nghĩa schema
 const roomSchema = new mongoose.Schema({
